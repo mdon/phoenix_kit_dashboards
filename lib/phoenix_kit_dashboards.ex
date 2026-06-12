@@ -1,0 +1,132 @@
+defmodule PhoenixKitDashboards do
+  @moduledoc """
+  Customizable dashboards for PhoenixKit.
+
+  Lets users compose dashboard pages from **widgets** contributed by any
+  PhoenixKit module. A widget is a self-contained `Phoenix.LiveComponent`; a
+  dashboard is a free-form 2D grid of placed widget instances, each with its own
+  size, position, and settings. Layouts are persisted per user (personal
+  dashboards) and per system/role (shared dashboards).
+
+  ## Architecture
+
+  - `PhoenixKitDashboards.Widget` — the widget **type** struct + the plain-map
+    provider contract (`phoenix_kit_widgets/0`).
+  - `PhoenixKitDashboards.Registry` — runtime discovery + cached catalog (built-in
+    widgets ∪ provider widgets), filtered by module enablement and permissions.
+  - `PhoenixKitDashboards.Widgets.*` — the built-in widgets (note, clock,
+    module-stats).
+  - `PhoenixKitDashboards.Schemas.Dashboard` + `PhoenixKitDashboards.Dashboards` —
+    the dashboard schema (JSONB `layout`) and its context. The backing table
+    (`phoenix_kit_dashboards`) is created by core's versioned migration `V133` —
+    modules do no DDL of their own.
+  - `PhoenixKitDashboards.Web.*` — the manage + builder LiveViews.
+
+  ## Exposing widgets from another module
+
+  Any module can contribute widgets by defining a zero-arity
+  `phoenix_kit_widgets/0` returning plain maps — no dependency on this package:
+
+      def phoenix_kit_widgets do
+        [%{key: "emails.deliverability", name: "Deliverability",
+           module_key: "emails", component: PhoenixKitEmails.Widgets.DeliverabilityLive,
+           default_size: %{w: 6, h: 2}}]
+      end
+
+  See `PhoenixKitDashboards.Widget` for the full contract.
+  """
+
+  use PhoenixKit.Module
+
+  alias PhoenixKit.Dashboard.Tab
+  alias PhoenixKit.Settings
+
+  @module_key "dashboards"
+
+  # ── Required callbacks ─────────────────────────────────────────────
+
+  @impl PhoenixKit.Module
+  def module_key, do: @module_key
+
+  @impl PhoenixKit.Module
+  def module_name, do: "Dashboards"
+
+  @impl PhoenixKit.Module
+  def enabled? do
+    Settings.get_boolean_setting("dashboards_enabled", false)
+  rescue
+    _ -> false
+  catch
+    :exit, _ -> false
+  end
+
+  @impl PhoenixKit.Module
+  def enable_system do
+    Settings.update_boolean_setting_with_module("dashboards_enabled", true, @module_key)
+  end
+
+  @impl PhoenixKit.Module
+  def disable_system do
+    Settings.update_boolean_setting_with_module("dashboards_enabled", false, @module_key)
+  end
+
+  # ── Optional callbacks ─────────────────────────────────────────────
+
+  @impl PhoenixKit.Module
+  def version, do: "0.1.0"
+
+  @impl PhoenixKit.Module
+  def permission_metadata do
+    %{
+      key: @module_key,
+      label: "Dashboards",
+      icon: "hero-squares-2x2",
+      description: "Build custom dashboard pages from widgets exposed by any module"
+    }
+  end
+
+  @impl PhoenixKit.Module
+  def admin_tabs do
+    [
+      %Tab{
+        id: :admin_dashboards,
+        label: "Dashboards",
+        icon: "hero-squares-2x2",
+        path: "dashboards",
+        priority: 650,
+        level: :admin,
+        permission: @module_key,
+        match: :prefix,
+        group: :admin_modules,
+        live_view: {PhoenixKitDashboards.Web.DashboardsLive, :index}
+      },
+      # Hidden tab: the per-dashboard builder. Not shown in the sidebar; reached
+      # by navigating from the list. Dynamic :uuid segment is spliced verbatim
+      # into the generated route.
+      %Tab{
+        id: :admin_dashboards_builder,
+        label: "Dashboard Builder",
+        path: "dashboards/:uuid",
+        priority: 651,
+        level: :admin,
+        permission: @module_key,
+        parent: :admin_dashboards,
+        visible: false,
+        live_view: {PhoenixKitDashboards.Web.BuilderLive, :edit}
+      }
+    ]
+  end
+
+  @impl PhoenixKit.Module
+  def css_sources, do: [:phoenix_kit_dashboards]
+
+  @impl PhoenixKit.Module
+  def get_config do
+    %{
+      enabled: enabled?(),
+      widget_count: length(PhoenixKitDashboards.Registry.list())
+    }
+  rescue
+    _ -> %{enabled: false}
+  end
+end
