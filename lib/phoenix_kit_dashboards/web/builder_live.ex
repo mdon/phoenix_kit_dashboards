@@ -906,17 +906,20 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       data-max-h={@limits.max_h}
       style={if @mode == "free", do: free_placement_style(@inst), else: grid_area_style(@placement)}
     >
-      <div class="flex items-center justify-between gap-1 border-b border-base-300 bg-base-200/40 px-1.5 py-1">
-        <button
-          type="button"
-          class={[
-            grip_class(@mode),
-            "cursor-grab touch-none px-1 text-base-content/30 hover:text-base-content/70"
-          ]}
-          title={grip_title(@mode)}
-        >
+      <%!-- The WHOLE top bar is the drag handle (the drag hooks ignore
+      pointer-downs on the buttons inside it); the grip icon is just the visual
+      affordance. --%>
+      <div
+        class={[
+          grip_class(@mode),
+          "flex cursor-grab touch-none select-none items-center justify-between gap-1",
+          "border-b border-base-300 bg-base-200/40 px-1.5 py-1"
+        ]}
+        title={grip_title(@mode)}
+      >
+        <span class="px-1 text-base-content/30" aria-hidden="true">
           <.icon name="hero-bars-2" class="w-4 h-4" />
-        </button>
+        </span>
 
         <div class="flex items-center gap-0.5 opacity-40 transition-opacity group-hover/widget:opacity-100">
           <.move_nudge :if={@mode == "free"} id={@inst["id"]} />

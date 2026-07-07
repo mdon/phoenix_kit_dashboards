@@ -76,7 +76,9 @@ normally — there is **no** `phx-update="ignore"` and no client-owned DOM.
 it can't do 2D cell placement): the grid container sets
 `phx-hook="DashboardGridDrag"` + `data-cols`, each card is a
 `.sortable-item[data-id]` carrying `data-x/-y/-w/-h`, dragged by its
-`.pk-drag-handle`. A floating clone follows the cursor while the widget itself
+`.pk-drag-handle` — the widget's WHOLE top bar (buttons inside it are excluded
+by the hook, so settings/remove still click; the grip icon is just the
+affordance). A floating clone follows the cursor while the widget itself
 jumps cell-to-cell under it as the live preview — the target cell comes from the
 clone's top-left against the grid metrics (data-cols + computed gaps/auto-rows +
 the fit scale), and the preview only ever moves through FREE cells (occupancy from

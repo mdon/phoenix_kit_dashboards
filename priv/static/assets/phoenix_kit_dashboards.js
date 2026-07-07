@@ -26,6 +26,9 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         // Primary button only — a right-click must open the context menu, not
         // start a drag that never sees its pointerup.
         if (e.button != null && e.button !== 0) return;
+        // The whole top bar is the handle, but its buttons (settings/remove/
+        // nudges) must stay buttons — a press on them never starts a drag.
+        if (e.target.closest("button, a, input, select, textarea, label")) return;
         var handle = e.target.closest(".pk-free-handle");
         if (!handle || !self.el.contains(handle)) return;
         var card = handle.closest(".sortable-item");
@@ -428,6 +431,9 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       this._onDown = function (e) {
         if (self.item) return;
         if (e.button != null && e.button !== 0) return;
+        // The whole top bar is the handle, but its buttons (settings/remove)
+        // must stay buttons — a press on them never starts a drag.
+        if (e.target.closest("button, a, input, select, textarea, label")) return;
         var handle = e.target.closest(".pk-drag-handle");
         if (!handle) return;
         var item = handle.closest(".sortable-item[data-id]");
