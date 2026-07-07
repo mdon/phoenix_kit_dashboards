@@ -30,6 +30,9 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidgetTest do
       assert {_dt, "UTC"} = ClockWidget.resolve_time("UTC+99:99")
       assert {_dt, "UTC"} = ClockWidget.resolve_time("UTC+5:99")
       assert {_dt, "UTC"} = ClockWidget.resolve_time("UTC-13")
+      # Boundary + minutes overshoots the real maximum total offset.
+      assert {_dt, "UTC"} = ClockWidget.resolve_time("UTC+14:59")
+      assert {_dt, "UTC"} = ClockWidget.resolve_time("UTC-12:30")
       # …but the real-world extremes stay valid.
       assert {_dt, "UTC+14"} = ClockWidget.resolve_time("UTC+14")
       assert {_dt, "UTC-12"} = ClockWidget.resolve_time("UTC-12")

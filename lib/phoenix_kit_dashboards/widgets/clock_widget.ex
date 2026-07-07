@@ -71,14 +71,18 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
     end
   end
 
-  # Real-world offsets only (UTC-12 … UTC+14, minutes 0-59) — a crafted or
-  # stale setting like "UTC+99:99" degrades to UTC instead of rendering a time
-  # shifted by days.
-  defp offset_time(tz, sign, hours, minutes)
-       when minutes in 0..59 and
-              ((sign == "+" and hours <= 14) or (sign == "-" and hours <= 12)) do
-    secs = if(sign == "-", do: -1, else: 1) * (hours * 60 + minutes) * 60
-    {DateTime.add(DateTime.utc_now(), secs, :second), tz}
+  # Real-world offsets only (UTC-12:00 … UTC+14:00, total) — a crafted or
+  # stale setting like "UTC+99:99" or the boundary-overshooting "UTC+14:59"
+  # degrades to UTC instead of rendering a time shifted past any real zone.
+  defp offset_time(tz, sign, hours, minutes) when minutes in 0..59 do
+    total = hours * 60 + minutes
+
+    if (sign == "+" and total <= 14 * 60) or (sign == "-" and total <= 12 * 60) do
+      secs = if(sign == "-", do: -1, else: 1) * total * 60
+      {DateTime.add(DateTime.utc_now(), secs, :second), tz}
+    else
+      {DateTime.utc_now(), "UTC"}
+    end
   end
 
   defp offset_time(_tz, _sign, _hours, _minutes), do: {DateTime.utc_now(), "UTC"}
