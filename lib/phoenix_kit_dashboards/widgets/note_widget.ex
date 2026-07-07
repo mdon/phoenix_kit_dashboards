@@ -34,16 +34,23 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
      socket
      |> assign(:id, assigns.id)
      |> assign(:title, Map.get(settings, "title", "Note"))
-     |> assign(:body, Map.get(settings, "body", ""))}
+     |> assign(:body, Map.get(settings, "body", ""))
+     # A single-row instance renders dense (tighter padding, smaller text) so a
+     # short note FITS the minimum box instead of growing a scrollbar; a long
+     # body still scrolls via the host chrome at any size.
+     |> assign(:compact, compact?(assigns[:size]))}
   end
 
   @impl true
   def render(assigns) do
     ~H"""
     <div class="card bg-base-100 h-full">
-      <div class="card-body p-4">
-        <h3 class="card-title text-sm">{@title}</h3>
-        <p class="text-sm text-base-content/70 whitespace-pre-wrap">
+      <div class={["card-body", if(@compact, do: "gap-1 p-2", else: "p-4")]}>
+        <h3 class={["card-title", if(@compact, do: "text-xs", else: "text-sm")]}>{@title}</h3>
+        <p class={[
+          "text-base-content/70 whitespace-pre-wrap",
+          if(@compact, do: "text-xs", else: "text-sm")
+        ]}>
           {if @body == "",
             do: Gettext.gettext(PhoenixKitWeb.Gettext, "Empty note — open settings to add text."),
             else: @body}
@@ -52,4 +59,7 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
     </div>
     """
   end
+
+  defp compact?(%{h: h}) when is_integer(h), do: h < 2
+  defp compact?(_), do: false
 end

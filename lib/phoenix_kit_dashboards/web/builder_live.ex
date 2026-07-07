@@ -1346,12 +1346,15 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 max={@limits.max_h}
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Height")}
               />
+              <%!-- Column/Row maxima are HTML-permissive too: a tight max is
+              computed from the CURRENT width, so "shrink + move right" in one
+              save would trip native validation. The server clamps exactly. --%>
               <.input
                 type="number"
                 name="x"
                 value={@grid_x}
                 min="1"
-                max={max(@cols - @grid_w + 1, 1)}
+                max={@cols}
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Column")}
               />
               <.input
@@ -1359,7 +1362,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 name="y"
                 value={@grid_y}
                 min="1"
-                max={max(@max_rows - @grid_h + 1, 1)}
+                max={@max_rows}
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Row")}
               />
             </div>

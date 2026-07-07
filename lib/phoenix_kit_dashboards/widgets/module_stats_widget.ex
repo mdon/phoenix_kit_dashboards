@@ -23,15 +23,18 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
      |> assign(:id, assigns.id)
      |> assign(:module_key, module_key)
      |> assign(:stats, stats)
-     |> assign(:effective_view, effective_view(assigns[:view], assigns[:size], stats))}
+     |> assign(:effective_view, effective_view(assigns[:view], assigns[:size], stats))
+     # A single-row instance renders dense so the headline count FITS the
+     # minimum box instead of growing a scrollbar.
+     |> assign(:compact, compact?(assigns[:size]))}
   end
 
   @impl true
   def render(assigns) do
     ~H"""
     <div class="card bg-base-100 h-full">
-      <div class="card-body p-4">
-        <h3 class="card-title text-sm">
+      <div class={["card-body", if(@compact, do: "gap-0.5 p-2", else: "p-4")]}>
+        <h3 class={["card-title", if(@compact, do: "text-xs", else: "text-sm")]}>
           {if @module_key == "",
             do: Gettext.gettext(PhoenixKitWeb.Gettext, "Module stats"),
             else: @module_key}
@@ -58,13 +61,20 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
           :if={@stats != %{} and @effective_view == "compact"}
           class="flex flex-1 flex-col items-center justify-center"
         >
-          <span class="text-3xl font-bold">{map_size(@stats)}</span>
-          <span class="text-xs text-base-content/50">{Gettext.gettext(PhoenixKitWeb.Gettext, "stats")}</span>
+          <span class={["font-bold", if(@compact, do: "text-2xl", else: "text-3xl")]}>
+            {map_size(@stats)}
+          </span>
+          <span class="text-xs text-base-content/50">
+            {Gettext.gettext(PhoenixKitWeb.Gettext, "stats")}
+          </span>
         </div>
       </div>
     </div>
     """
   end
+
+  defp compact?(%{h: h}) when is_integer(h), do: h < 2
+  defp compact?(_), do: false
 
   # Honor the selected view, but degrade to compact when the widget is too small
   # for a table (or when a single stat makes a table pointless).
