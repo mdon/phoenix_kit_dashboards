@@ -38,6 +38,8 @@ defmodule PhoenixKitDashboards.Widgets do
         component: ClockWidget,
         default_size: %{w: 3, h: 1},
         min_size: %{w: 2, h: 1},
+        # Ticks live — the host re-renders it every second.
+        refresh_interval: 1000,
         category: "Built-in",
         settings_schema: [
           %{key: "label", type: :string, label: "Label", default: "Server time"}
@@ -50,7 +52,13 @@ defmodule PhoenixKitDashboards.Widgets do
         icon: "hero-chart-bar",
         component: ModuleStatsWidget,
         default_size: %{w: 4, h: 2},
-        min_size: %{w: 3, h: 1},
+        min_size: %{w: 2, h: 1},
+        # Two render variants — the widget also collapses to the compact layout
+        # automatically when the instance is sized too small for the table.
+        views: [
+          %{key: "detailed", name: "Detailed (table)"},
+          %{key: "compact", name: "Compact (counts)"}
+        ],
         category: "Built-in",
         settings_schema: [
           %{key: "module_key", type: :string, label: "Module key", default: ""}

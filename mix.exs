@@ -76,8 +76,10 @@ defmodule PhoenixKitDashboards.MixProject do
   defp deps do
     [
       # PhoenixKit provides the Module behaviour, Settings API, Repo helper, and
-      # the ModuleRegistry we query to discover widget providers.
-      pk_dep(:phoenix_kit, "~> 1.7"),
+      # the ModuleRegistry we query to discover widget providers. Floor is 1.7.145
+      # — the release that ships core migration V133 (the phoenix_kit_dashboards
+      # table); an older 1.7.x would resolve the pin yet have no backing table.
+      pk_dep(:phoenix_kit, "~> 1.7.145"),
 
       # LiveView powers the dashboard builder and the widget LiveComponents.
       {:phoenix_live_view, "~> 1.1"},
@@ -98,7 +100,7 @@ defmodule PhoenixKitDashboards.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
-      files: ~w(lib .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
+      files: ~w(lib priv .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 

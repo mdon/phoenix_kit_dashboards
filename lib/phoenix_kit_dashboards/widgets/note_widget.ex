@@ -13,13 +13,16 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
         module={widget.component}
         id={instance_id}
         settings={instance_settings}
+        view={selected_view}          # nil or a declared view key
+        size={%{w: w, h: h}}          # the instance's current span
         scope={@phoenix_kit_current_scope}
       />
 
-  So a widget component must handle the `:settings` and `:scope` assigns. It runs
-  inside the host LiveView's process (LiveComponents have no process of their
-  own), so for live updates a widget declares a PubSub topic and the host routes
-  messages to it via `send_update/2` — never subscribe from inside `update/2`.
+  So a widget component handles the `:settings`, `:view`, `:size`, and `:scope`
+  assigns (all optional to read). It runs inside the host LiveView's process
+  (LiveComponents have no process of their own), so for live data a widget's
+  catalog entry declares a `refresh_interval` (ms) and the host re-`send_update/2`s
+  it on that cadence — the widget never subscribes/times itself.
   """
   use Phoenix.LiveComponent
 
@@ -41,7 +44,9 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
       <div class="card-body p-4">
         <h3 class="card-title text-sm">{@title}</h3>
         <p class="text-sm text-base-content/70 whitespace-pre-wrap">
-          {if @body == "", do: "Empty note — open settings to add text.", else: @body}
+          {if @body == "",
+            do: Gettext.gettext(PhoenixKitWeb.Gettext, "Empty note — open settings to add text."),
+            else: @body}
         </p>
       </div>
     </div>

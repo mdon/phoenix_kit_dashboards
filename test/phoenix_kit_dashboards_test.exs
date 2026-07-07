@@ -53,10 +53,54 @@ defmodule PhoenixKitDashboardsTest do
     end
 
     test "built-in widgets have no module gate, so survive scope filtering" do
-      built_in = Enum.filter(Registry.list(), &(&1.source == :builtin))
+      # The built-ins are provided by this module itself, through the same
+      # phoenix_kit_widgets/0 contract every provider uses.
+      built_in = Enum.filter(Registry.list(), &(&1.source == PhoenixKitDashboards))
       assert built_in != []
+      assert Enum.all?(built_in, &is_nil(&1.module_key))
       visible = Registry.list_for_scope(:some_scope)
       assert Enum.all?(built_in, fn w -> w.key in Enum.map(visible, & &1.key) end)
+    end
+  end
+
+  describe "Registry.visible_for_scope?/2 (the placed-widget render gate)" do
+    defmodule GateComponent do
+      use Phoenix.LiveComponent
+      def render(assigns), do: ~H""
+    end
+
+    defp gate_widget(module_key) do
+      {:ok, widget} =
+        Widget.from_map(
+          %{key: "g.#{module_key || "none"}", name: "G", component: GateComponent}
+          |> Map.merge(if module_key, do: %{module_key: module_key}, else: %{}),
+          :prov
+        )
+
+      widget
+    end
+
+    test "a widget with no module_key is visible to any scope" do
+      assert Registry.visible_for_scope?(gate_widget(nil), :any_scope)
+      assert Registry.visible_for_scope?(gate_widget(nil), nil)
+    end
+
+    test "a widget whose module is disabled is NOT visible — even to a nil scope" do
+      # "dashboards" resolves to this module via ModuleRegistry; enabled?/0 is
+      # false in the test env (no enabling setting — the settings query errors
+      # outside a sandbox checkout and enabled?/0 rescues to false; capture that
+      # expected error log), so the gate must close for a placed widget exactly
+      # like it hides the catalog entry.
+      ExUnit.CaptureLog.capture_log(fn ->
+        refute Registry.visible_for_scope?(gate_widget("dashboards"), nil)
+        refute Registry.visible_for_scope?(gate_widget("dashboards"), :any_scope)
+      end)
+    end
+
+    test "an unknown module_key passes enablement; a nil scope skips the permission half" do
+      assert Registry.visible_for_scope?(gate_widget("no_such_module"), nil)
+      # A non-Scope term fails the permission check closed.
+      refute Registry.visible_for_scope?(gate_widget("no_such_module"), :not_a_scope)
     end
   end
 
@@ -92,6 +136,133 @@ defmodule PhoenixKitDashboardsTest do
         )
 
       assert Widget.default_settings(widget) == %{"a" => "z"}
+    end
+
+    test "normalizes view variants and drops malformed ones" do
+      {:ok, widget} =
+        Widget.from_map(
+          %{
+            key: "x.y",
+            name: "Y",
+            component: DummyComponent,
+            views: [%{key: "detailed", name: "Detailed"}, %{key: "simple"}, %{name: "no key"}]
+          },
+          :prov
+        )
+
+      assert widget.views == [
+               %{key: "detailed", name: "Detailed"},
+               %{key: "simple", name: "simple"}
+             ]
+
+      assert Widget.default_view(widget) == "detailed"
+    end
+
+    test "default_view is nil when the widget declares no views" do
+      {:ok, widget} = Widget.from_map(%{key: "x.y", name: "Y", component: DummyComponent}, :prov)
+      assert widget.views == []
+      assert Widget.default_view(widget) == nil
+    end
+
+    test "drops a non-map provider entry rather than crashing discovery" do
+      assert {:error, :not_a_map} = Widget.from_map("oops", :prov)
+      assert {:error, :not_a_map} = Widget.from_map(nil, :prov)
+    end
+
+    test "rejects a non-atom or non-LiveComponent component" do
+      assert {:error, {:invalid_component, _}} =
+               Widget.from_map(%{key: "x", name: "Y", component: "NotAModule"}, :prov)
+
+      # Enum is loaded but is not a Phoenix.LiveComponent.
+      assert {:error, {:not_a_live_component, Enum}} =
+               Widget.from_map(%{key: "x", name: "Y", component: Enum}, :prov)
+    end
+
+    test "normalizes settings_schema and drops malformed fields" do
+      {:ok, widget} =
+        Widget.from_map(
+          %{
+            key: "x",
+            name: "Y",
+            component: DummyComponent,
+            settings_schema: [
+              %{key: "a", type: :select, options: ["1", "2"], default: "1"},
+              %{type: :string},
+              "junk"
+            ]
+          },
+          :prov
+        )
+
+      assert [%{key: "a", type: :select, options: ["1", "2"], default: "1"}] =
+               widget.settings_schema
+    end
+
+    test "sanitizes incoherent size bounds (min <= default <= max, width within the widest tier)" do
+      {:ok, widget} =
+        Widget.from_map(
+          %{
+            key: "x",
+            name: "Y",
+            component: DummyComponent,
+            min_size: %{w: 20, h: 0},
+            max_size: %{w: 24, h: 3},
+            default_size: %{w: 1, h: 99}
+          },
+          :prov
+        )
+
+      # min_w clamped into [1, max_cols], max_w >= min_w and <= max_cols (16 —
+      # the TV tier), min_h >= 1, default clamped into [min, max] per dimension.
+      cap = PhoenixKitDashboards.Breakpoints.max_cols()
+      assert widget.min_size == %{w: cap, h: 1}
+      assert widget.max_size == %{w: cap, h: 3}
+      assert widget.default_size == %{w: cap, h: 3}
+    end
+
+    test "the width cap is the LARGEST tier's columns, so a widget can span a full TV row" do
+      assert PhoenixKitDashboards.Breakpoints.max_cols() == 16
+
+      {:ok, widget} =
+        Widget.from_map(
+          %{key: "x", name: "Y", component: DummyComponent, max_size: %{w: 16, h: 4}},
+          :prov
+        )
+
+      assert widget.max_size.w == 16
+
+      # A provider that declares no max at all gets the full-TV-row default.
+      {:ok, unbounded} = Widget.from_map(%{key: "x", name: "Y", component: DummyComponent}, :prov)
+      assert unbounded.max_size.w == 16
+    end
+  end
+
+  describe "built-in module_stats widget" do
+    test "declares detailed + compact views" do
+      widget = Registry.get("core.module_stats")
+      assert Enum.map(widget.views, & &1.key) == ["detailed", "compact"]
+    end
+  end
+
+  describe "live refresh contract" do
+    test "clock declares a refresh interval; note is static" do
+      assert Registry.get("core.clock").refresh_interval == 1000
+      assert Registry.get("core.note").refresh_interval == nil
+    end
+
+    test "from_map clamps a too-small interval to the 1s floor" do
+      {:ok, widget} =
+        Widget.from_map(
+          %{
+            key: "x",
+            name: "X",
+            component: PhoenixKitDashboards.Widgets.NoteWidget,
+            refresh_interval: 50
+          },
+          :prov
+        )
+
+      assert widget.refresh_interval == 1000
     end
   end
 end

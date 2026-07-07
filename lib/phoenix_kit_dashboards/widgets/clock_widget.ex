@@ -1,10 +1,10 @@
 defmodule PhoenixKitDashboards.Widgets.ClockWidget do
   @moduledoc """
-  Built-in "Clock" widget — shows the current server time.
+  Built-in "Clock" widget — shows the current server time, ticking live.
 
-  Renders a snapshot taken at render time. To make it tick live, the host
-  LiveView would `Process.send_after/3` itself a `:tick` and re-`send_update/2`
-  this component — see the PubSub note in `PhoenixKitDashboards.Widgets.NoteWidget`.
+  Its catalog entry declares `refresh_interval: 1000`, so the host's refresh loop
+  `send_update/2`s it every second and `update/2` re-reads `DateTime.utc_now/0`.
+  A widget that needs no live data simply omits `refresh_interval`.
   """
   use Phoenix.LiveComponent
 
@@ -15,7 +15,10 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
     {:ok,
      socket
      |> assign(:id, assigns.id)
-     |> assign(:label, Map.get(settings, "label", "Server time"))
+     |> assign(
+       :label,
+       Map.get(settings, "label") || Gettext.gettext(PhoenixKitWeb.Gettext, "Server time")
+     )
      |> assign(:now, DateTime.utc_now())}
   end
 
