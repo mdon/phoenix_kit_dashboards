@@ -327,6 +327,44 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert {:ok, _} = Dashboards.place_widget_grid(d, id, "desktop", 4, 2)
     end
 
+    test "add_widget_at drops a catalog widget at the given cell and marks the tier designed",
+         %{dashboard: d} do
+      assert {:ok, added} = Dashboards.add_widget_at(d, "core.clock", "desktop", 5, 4)
+
+      clock = List.last(added.layout)
+      assert clock["widget_key"] == "core.clock"
+      # core.clock default 3x1, placed exactly where dropped.
+      assert %{"x" => 5, "y" => 4, "w" => 3, "h" => 1} = Layout.placement(clock, "desktop")
+      assert Dashboards.customized?(added, "desktop")
+
+      assert_activity_logged("dashboard.widget_added",
+        resource_uuid: d.uuid,
+        metadata_has: %{"widget_key" => "core.clock"}
+      )
+    end
+
+    test "add_widget_at clamps into the tier and refuses an occupied cell", %{
+      dashboard: d,
+      id: id
+    } do
+      # The note sits at (0,0) 4x2 — dropping onto it is refused.
+      {:ok, d} = Dashboards.place_widget_grid(d, id, "desktop", 0, 0)
+      assert {:error, :occupied} = Dashboards.add_widget_at(d, "core.clock", "desktop", 1, 0)
+
+      # A far-out x clamps to the right edge instead of failing.
+      assert {:ok, added} = Dashboards.add_widget_at(d, "core.clock", "desktop", 99, 0)
+      assert %{"x" => 9, "y" => 0} = Layout.placement(List.last(added.layout), "desktop")
+    end
+
+    test "add_widget_px drops a catalog widget at exact canvas px", %{dashboard: d} do
+      assert {:ok, added} = Dashboards.add_widget_px(d, "core.clock", 250, 480)
+      assert %{"fx" => 250, "fy" => 480} = Layout.pixel(List.last(added.layout))
+
+      # Negative coordinates clamp to the top-left.
+      assert {:ok, added2} = Dashboards.add_widget_px(added, "core.note", -50, -10)
+      assert %{"fx" => 0, "fy" => 0} = Layout.pixel(List.last(added2.layout))
+    end
+
     test "the first edit of a derived tier persists its materialization even when nothing changes",
          %{dashboard: d, id: id} do
       # TV derives from the desktop home. Resizing it to EXACTLY the derived size

@@ -85,7 +85,12 @@ the fit scale), and the preview only ever moves through FREE cells (occupancy fr
 the other cards' data attrs), so the shown spot is always legal and **the drop
 always matches the preview**. On drop it pushes `move_widget_grid %{id, x, y}`
 (0-based cells; `Dashboards.place_widget_grid/5` clamps + collision-rejects
-server-side). **Resize** is a bottom-right corner grip (`.pk-resize-handle`) driven
+server-side). **Catalog drag-out** (`DashboardCatalogDrag` on `#dashboard-catalog`,
+entries carry `data-widget-key/-w/-h`): drag an entry past a ~6px threshold and a
+ghost + a free-cells-only dashed footprint follow the pointer; dropping pushes
+`add_widget_at %{key, x, y}` (grid) or `add_widget_px %{key, fx, fy}` (pixel
+canvas) — a plain click still adds at the first free spot, and a completed drag
+swallows its trailing click. **Resize** is a bottom-right corner grip (`.pk-resize-handle`) driven
 by the per-card `DashboardResize` hook — pixel-smooth while dragging, and on
 release it **branches on the card's `data-free` flag**: grid mode snaps to the
 nearest whole cell that FITS (grid edge + neighbours, mirroring `Grid.fit_size/8`)

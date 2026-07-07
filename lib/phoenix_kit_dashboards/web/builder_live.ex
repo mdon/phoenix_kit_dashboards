@@ -30,6 +30,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   Custom hooks (shipped via `js_sources/0`): `DashboardGridDrag` (grid cell
   placement — the widget follows the drag cell-by-cell, never onto an occupied
+  spot), `DashboardCatalogDrag` (drag a widget type OUT of the catalog and drop
+  it on a grid cell or canvas point; a plain click still adds at the first free
   spot), `DashboardFreeDrag` (free-canvas move via `left/top`) and
   `DashboardResize` (corner grip `.pk-resize-handle` — px in free mode; cell-snap
   clamped by neighbours in grid). The non-hook fallbacks are the free-canvas
@@ -124,19 +126,42 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   @impl true
   def handle_event("add_widget", %{"key" => key}, socket) when is_binary(key) do
-    case Dashboards.add_widget(socket.assigns.dashboard, key, actor_opts(socket)) do
-      {:ok, dashboard} ->
-        # Restart the refresh loop if the newly-added widget is a live one.
-        {:noreply, socket |> assign(:dashboard, dashboard) |> maybe_schedule_refresh()}
+    added(socket, Dashboards.add_widget(socket.assigns.dashboard, key, actor_opts(socket)))
+  end
 
-      {:error, _} ->
-        {:noreply,
-         put_flash(
-           socket,
-           :error,
-           Gettext.gettext(PhoenixKitWeb.Gettext, "Could not add widget.")
-         )}
-    end
+  # A catalog entry dragged out and dropped on a grid cell (DashboardCatalogDrag).
+  # x/y are 0-based cells for the active bp; the context clamps + refuses an
+  # occupied spot (the hook only offers free cells).
+  @impl true
+  def handle_event("add_widget_at", %{"key" => key, "x" => x, "y" => y}, socket)
+      when is_binary(key) do
+    added(
+      socket,
+      Dashboards.add_widget_at(
+        socket.assigns.dashboard,
+        key,
+        socket.assigns.active_bp,
+        to_i(x),
+        to_i(y),
+        actor_opts(socket)
+      )
+    )
+  end
+
+  # A catalog entry dropped on the pixel canvas at exact px.
+  @impl true
+  def handle_event("add_widget_px", %{"key" => key, "fx" => fx, "fy" => fy}, socket)
+      when is_binary(key) do
+    added(
+      socket,
+      Dashboards.add_widget_px(
+        socket.assigns.dashboard,
+        key,
+        to_i(fx),
+        to_i(fy),
+        actor_opts(socket)
+      )
+    )
   end
 
   @impl true
@@ -509,6 +534,17 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     do: {:noreply, assign(socket, :dashboard, dashboard)}
 
   defp apply_layout(socket, {:error, _}), do: {:noreply, socket}
+
+  # Shared add-widget outcome: assign + restart the refresh loop if the new
+  # widget is a live one; flash on failure.
+  defp added(socket, {:ok, dashboard}) do
+    {:noreply, socket |> assign(:dashboard, dashboard) |> maybe_schedule_refresh()}
+  end
+
+  defp added(socket, {:error, _}) do
+    {:noreply,
+     put_flash(socket, :error, Gettext.gettext(PhoenixKitWeb.Gettext, "Could not add widget."))}
+  end
 
   # The Settings modal's size inputs (server-driven resize fallback). Free mode
   # submits px (fw/fh); grid mode submits cell spans (w/h). Blank values leave the
@@ -1164,14 +1200,21 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   attr(:catalog, :list, required: true)
   attr(:overlay, :boolean, default: false)
 
+  # Catalog entries CLICK to add at the first free spot, or DRAG OUT onto the
+  # grid/canvas to place directly (DashboardCatalogDrag — a drag starts after a
+  # small movement threshold, so plain clicks keep working).
   defp catalog_drawer(assigns) do
     ~H"""
-    <div class={[
-      "w-72 shrink-0 border-l border-base-300 bg-base-100 overflow-auto",
-      # When the grid is fit-scaled (small screen), float over it instead of taking
-      # flex width and squeezing the grid.
-      @overlay && "absolute right-0 top-0 bottom-0 z-20 shadow-xl"
-    ]}>
+    <div
+      id="dashboard-catalog"
+      phx-hook="DashboardCatalogDrag"
+      class={[
+        "w-72 shrink-0 border-l border-base-300 bg-base-100 overflow-auto",
+        # When the grid is fit-scaled (small screen), float over it instead of taking
+        # flex width and squeezing the grid.
+        @overlay && "absolute right-0 top-0 bottom-0 z-20 shadow-xl"
+      ]}
+    >
       <div class="p-3 border-b border-base-300 text-sm font-semibold">
         {Gettext.gettext(PhoenixKitWeb.Gettext, "Widget catalog")}
       </div>
@@ -1181,7 +1224,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           type="button"
           phx-click="add_widget"
           phx-value-key={widget.key}
-          class="text-left p-2 rounded hover:bg-base-200 flex gap-2 items-start"
+          data-widget-key={widget.key}
+          data-w={widget.default_size.w}
+          data-h={widget.default_size.h}
+          title={Gettext.gettext(PhoenixKitWeb.Gettext, "Click to add, or drag onto the dashboard")}
+          class="text-left p-2 rounded hover:bg-base-200 flex gap-2 items-start cursor-grab"
         >
           <.icon name={widget.icon} class="w-5 h-5 mt-0.5 text-base-content/60" />
           <span>

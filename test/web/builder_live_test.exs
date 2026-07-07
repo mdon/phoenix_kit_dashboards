@@ -77,6 +77,43 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
         metadata_has: %{"widget_key" => "core.note"}
       )
     end
+
+    test "add_widget_at drops a catalog drag at the given cell (grid)", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      render_hook(view, "set_bp", %{"bp" => "desktop"})
+      html = render_hook(view, "add_widget_at", %{"key" => "core.note", "x" => 6, "y" => 3})
+
+      assert [inst] = Dashboards.get(dashboard.uuid).layout
+      assert %{"x" => 6, "y" => 3} = Layout.placement(inst, "desktop")
+      assert html =~ ~s(grid-column: 7 / span)
+      assert html =~ ~s(grid-row: 4 / span)
+    end
+
+    test "add_widget_px drops a catalog drag at exact px (pixel dashboard)", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid, %{config: %{"type" => "pixel"}})
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      render_hook(view, "add_widget_px", %{"key" => "core.note", "fx" => 320, "fy" => 260})
+
+      assert [inst] = Dashboards.get(dashboard.uuid).layout
+      assert %{"fx" => 320, "fy" => 260} = Layout.pixel(inst)
+    end
+
+    test "catalog entries carry the drag-out contract (hook + key + default size)", %{
+      conn: conn
+    } do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+
+      {:ok, _view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+
+      assert html =~ ~s(phx-hook="DashboardCatalogDrag")
+      assert html =~ ~s(data-widget-key="core.note")
+    end
   end
 
   describe "grid (Phoenix-first / cell placement)" do

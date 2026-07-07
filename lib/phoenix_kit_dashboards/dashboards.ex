@@ -224,7 +224,9 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   @doc """
   Add a widget instance for `widget_key` to a dashboard's layout, seeded with the
-  widget type's default size and settings. Returns the updated dashboard.
+  widget type's default size and settings — the grid placement takes the first
+  FREE cell on the home tier, the pixel geometry stacks below the existing
+  widgets. Returns the updated dashboard.
   """
   @spec add_widget(Dashboard.t(), widget_key :: String.t(), keyword()) ::
           {:ok, Dashboard.t()} | {:error, term()}
@@ -234,49 +236,125 @@ defmodule PhoenixKitDashboards.Dashboards do
         {:error, :unknown_widget}
 
       %Widget{} = widget ->
-        # Geometry is embedded per widget: `pixel` (the free canvas) and `bp`
-        # (grid placement per breakpoint — explicit cells). The grid seed takes
-        # the first FREE rectangle on the home tier (below/beside what's already
-        # placed, gaps included); pixel is stacked below existing widgets so a
-        # fresh one doesn't overlap.
-        home = home_bp(dashboard)
-        cols = Breakpoints.cols(home)
-        w = widget.default_size.w
+        dashboard
+        |> save_layout(dashboard.layout ++ [new_instance(dashboard, widget)])
+        |> log_on_ok("dashboard.widget_added", opts, %{"widget_key" => widget.key})
+    end
+  end
+
+  @doc """
+  Add a widget at an explicit grid cell on `bp` (a catalog drag-out drop) —
+  `x`/`y` 0-based, clamped into the tier; a spot overlapping another widget is
+  refused with `{:error, :occupied}` (the drag hook only offers free cells).
+  Marks the breakpoint customized. Logs `dashboard.widget_added`.
+  """
+  @spec add_widget_at(
+          Dashboard.t(),
+          widget_key :: String.t(),
+          String.t(),
+          integer(),
+          integer(),
+          keyword()
+        ) :: {:ok, Dashboard.t()} | {:error, :unknown_widget | :occupied | Ecto.Changeset.t()}
+  def add_widget_at(%Dashboard{} = dashboard, widget_key, bp, x, y, opts \\ [])
+      when is_binary(bp) and is_integer(x) and is_integer(y) do
+    case Registry.get(widget_key) do
+      nil ->
+        {:error, :unknown_widget}
+
+      %Widget{} = widget ->
+        # Pin the tier first so placing the new widget can't shift the others.
+        dashboard = materialize_grid(dashboard, bp)
+        cols = Breakpoints.cols(bp)
+        w = min(widget.default_size.w, cols)
         h = widget.default_size.h
-        # The home tier is designed (its stored placement renders verbatim, never
-        # re-derived), so the seed span must already fit its columns.
-        seed_w = min(w, cols)
+        x = clamp(x, 0, max(cols - w, 0))
+        y = clamp(y, 0, max(Grid.max_rows() - h, 0))
+        others = Enum.map(dashboard.layout, &Layout.placement(&1, bp))
 
-        occupied = dashboard |> resolve_items(home) |> Enum.map(fn {_i, p} -> p end)
-        {x, y} = Grid.first_free(occupied, seed_w, h, cols) || {0, Grid.below_all(occupied)}
-
-        instance = %{
-          "id" => UUIDv7.generate(),
-          "widget_key" => widget.key,
-          "view" => Widget.default_view(widget),
-          "settings" => Widget.default_settings(widget),
-          "pixel" => %{
-            "fx" => 0,
-            "fy" => next_pixel_y(dashboard.layout),
-            "fw" => w * @pixel_seed_col,
-            "fh" => h * @pixel_seed_row
-          },
-          "bp" => %{
-            home => %{
+        if Grid.collides?(x, y, w, h, others) do
+          {:error, :occupied}
+        else
+          instance =
+            dashboard
+            |> new_instance(widget)
+            |> Layout.put_placement(bp, %{
               "x" => x,
               "y" => y,
-              "w" => seed_w,
+              "w" => w,
               "h" => h,
               "hidden" => false,
               "pos" => length(dashboard.layout)
-            }
-          }
-        }
+            })
+
+          dashboard
+          |> save_customized(dashboard.layout ++ [instance], bp)
+          |> log_on_ok("dashboard.widget_added", opts, %{"widget_key" => widget.key})
+        end
+    end
+  end
+
+  @doc """
+  Add a widget at an explicit pixel position on the free canvas (a catalog
+  drag-out drop) — `fx`/`fy` clamped to the top-left; size is the widget type's
+  default seed. Logs `dashboard.widget_added`.
+  """
+  @spec add_widget_px(Dashboard.t(), widget_key :: String.t(), integer(), integer(), keyword()) ::
+          {:ok, Dashboard.t()} | {:error, :unknown_widget | Ecto.Changeset.t()}
+  def add_widget_px(%Dashboard{} = dashboard, widget_key, fx, fy, opts \\ [])
+      when is_integer(fx) and is_integer(fy) do
+    case Registry.get(widget_key) do
+      nil ->
+        {:error, :unknown_widget}
+
+      %Widget{} = widget ->
+        instance =
+          dashboard
+          |> new_instance(widget)
+          |> Layout.put_pixel(%{"fx" => max(fx, 0), "fy" => max(fy, 0)})
 
         dashboard
         |> save_layout(dashboard.layout ++ [instance])
         |> log_on_ok("dashboard.widget_added", opts, %{"widget_key" => widget.key})
     end
+  end
+
+  # A fresh widget instance with the default geometry: `pixel` stacked below the
+  # existing widgets, and the grid placement seeded at the home tier's first FREE
+  # cell (the home tier is designed — its stored placement renders verbatim, so
+  # the seed span must already fit its columns).
+  defp new_instance(dashboard, %Widget{} = widget) do
+    home = home_bp(dashboard)
+    cols = Breakpoints.cols(home)
+    w = widget.default_size.w
+    h = widget.default_size.h
+    seed_w = min(w, cols)
+
+    occupied = dashboard |> resolve_items(home) |> Enum.map(fn {_i, p} -> p end)
+    {x, y} = Grid.first_free(occupied, seed_w, h, cols) || {0, Grid.below_all(occupied)}
+
+    %{
+      "id" => UUIDv7.generate(),
+      "widget_key" => widget.key,
+      "view" => Widget.default_view(widget),
+      "settings" => Widget.default_settings(widget),
+      "pixel" => %{
+        "fx" => 0,
+        "fy" => next_pixel_y(dashboard.layout),
+        "fw" => w * @pixel_seed_col,
+        "fh" => h * @pixel_seed_row
+      },
+      "bp" => %{
+        home => %{
+          "x" => x,
+          "y" => y,
+          "w" => seed_w,
+          "h" => h,
+          "hidden" => false,
+          "pos" => length(dashboard.layout)
+        }
+      }
+    }
   end
 
   @doc """

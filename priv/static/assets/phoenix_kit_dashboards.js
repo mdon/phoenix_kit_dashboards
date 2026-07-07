@@ -649,6 +649,272 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
   };
 
 
+  // `DashboardCatalogDrag` — drag a widget TYPE out of the catalog and drop it
+  // where it should go: on a grid cell (cell-snapped dashed preview, free cells
+  // only — mirrors DashboardGridDrag) or on the pixel canvas (exact px). A drag
+  // arms on pointerdown but only starts after ~6px of travel, so a plain CLICK
+  // still adds at the first free spot via the entry's phx-click (a completed
+  // drag swallows that click). Drop pushes `add_widget_at` (grid, 0-based cells)
+  // or `add_widget_px` (canvas px); dropping anywhere else cancels.
+  window.PhoenixKitDashboardsHooks.DashboardCatalogDrag = {
+    mounted() {
+      var self = this;
+      this._onDown = function (e) {
+        if (self.active) return;
+        if (e.button != null && e.button !== 0) return;
+        var entry = e.target.closest("[data-widget-key]");
+        if (!entry || !self.el.contains(entry)) return;
+        self.arm(e, entry);
+      };
+      // Capture-phase: a pointerup that ends a real drag is followed by a click
+      // on the entry (when the pointer never left it) — swallow it so the drop
+      // doesn't ALSO add a first-free-cell copy. Time-windowed, NOT a latched
+      // flag: a drag that ends away from the catalog produces no trailing click,
+      // and a latched flag would eat the user's NEXT legitimate click instead.
+      this._onClick = function (e) {
+        if (self.suppressUntil && performance.now() < self.suppressUntil) {
+          self.suppressUntil = 0;
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      };
+      this.el.addEventListener("pointerdown", this._onDown);
+      this.el.addEventListener("click", this._onClick, true);
+    },
+
+    destroyed() {
+      if (this._onDown) this.el.removeEventListener("pointerdown", this._onDown);
+      if (this._onClick) this.el.removeEventListener("click", this._onClick, true);
+      this.cleanup();
+    },
+
+    arm(e, entry) {
+      var self = this;
+      this.active = true;
+      this.dragging = false;
+      this.entry = entry;
+      this.pointerId = e.pointerId;
+      this.startX = e.clientX;
+      this.startY = e.clientY;
+      this._onMove = function (ev) {
+        if (ev.pointerId !== self.pointerId) return;
+        self.move(ev);
+      };
+      this._onUp = function (ev) {
+        if (ev.pointerId === self.pointerId) self.drop();
+      };
+      this._onCancel = function (ev) {
+        if (ev.pointerId === self.pointerId) self.cancel();
+      };
+      document.addEventListener("pointermove", this._onMove, { passive: false });
+      document.addEventListener("pointerup", this._onUp);
+      document.addEventListener("pointercancel", this._onCancel);
+    },
+
+    move(ev) {
+      if (!this.dragging) {
+        var dx = ev.clientX - this.startX;
+        var dy = ev.clientY - this.startY;
+        if (dx * dx + dy * dy < 36) return;
+        this.begin();
+      }
+      ev.preventDefault();
+      this.ghost.style.left = ev.clientX + 10 + "px";
+      this.ghost.style.top = ev.clientY + 10 + "px";
+      this.track(ev);
+    },
+
+    begin() {
+      this.dragging = true;
+      this.key = this.entry.getAttribute("data-widget-key");
+      this.defW = parseInt(this.entry.getAttribute("data-w"), 10) || 4;
+      this.defH = parseInt(this.entry.getAttribute("data-h"), 10) || 2;
+      this.target = null;
+      this.grid = document.getElementById("dashboard-grid");
+      this.canvas = document.getElementById("dashboard-free-grid");
+      this.pane = document.getElementById(this.grid ? "dashboard-grid-fit" : "dashboard-free-fit");
+
+      if (this.grid) {
+        var cs = getComputedStyle(this.grid);
+        var cols = parseInt(this.grid.getAttribute("data-cols"), 10) || 12;
+        var gapX = parseFloat(cs.columnGap) || 0;
+        var gapY = parseFloat(cs.rowGap) || 0;
+        var rowH = parseFloat(cs.gridAutoRows) || 128;
+        var colW = (this.grid.offsetWidth - (cols - 1) * gapX) / cols;
+        var rect0 = this.grid.getBoundingClientRect();
+        this.m = {
+          cols: cols,
+          strideX: colW + gapX,
+          strideY: rowH + gapY,
+          scale: this.grid.offsetWidth ? rect0.width / this.grid.offsetWidth : 1
+        };
+        this.w = Math.min(this.defW, cols);
+        this.h = this.defH;
+        this.blockers = [];
+        var sibs = this.grid.querySelectorAll(".sortable-item[data-id]");
+        for (var i = 0; i < sibs.length; i++) {
+          this.blockers.push({
+            x: parseInt(sibs[i].getAttribute("data-x"), 10) || 0,
+            y: parseInt(sibs[i].getAttribute("data-y"), 10) || 0,
+            w: parseInt(sibs[i].getAttribute("data-w"), 10) || 1,
+            h: parseInt(sibs[i].getAttribute("data-h"), 10) || 1
+          });
+        }
+      }
+
+      // Floating ghost: a copy of the catalog row following the cursor.
+      var r = this.entry.getBoundingClientRect();
+      var ghost = this.entry.cloneNode(true);
+      ghost.removeAttribute("id");
+      ghost.style.cssText =
+        "position:fixed;pointer-events:none;z-index:9999;margin:0;width:" +
+        r.width +
+        "px;left:" +
+        r.left +
+        "px;top:" +
+        r.top +
+        "px;opacity:.92;background:var(--color-base-100);box-shadow:0 14px 34px rgba(0,0,0,.28);" +
+        "border-radius:.5rem;cursor:grabbing;";
+      document.body.appendChild(ghost);
+      this.ghost = ghost;
+
+      document.body.style.userSelect = "none";
+      document.body.style.cursor = "grabbing";
+    },
+
+    collides(x, y) {
+      for (var i = 0; i < this.blockers.length; i++) {
+        var b = this.blockers[i];
+        if (x < b.x + b.w && b.x < x + this.w && y < b.y + b.h && b.y < y + this.h) return true;
+      }
+      return false;
+    },
+
+    // The would-be placement under the pointer. Only a FREE, in-pane spot is a
+    // target (shown as a dashed footprint in the grid); anything else — outside
+    // the drop pane, back over the catalog, or an occupied cell — clears it, so
+    // a drop is exactly "place where the preview shows" or a cancel.
+    track(ev) {
+      var overCatalog = ev.target && ev.target.closest && ev.target.closest("#dashboard-catalog");
+      var pane = this.pane ? this.pane.getBoundingClientRect() : null;
+      var over =
+        pane &&
+        !overCatalog &&
+        ev.clientX >= pane.left &&
+        ev.clientX <= pane.right &&
+        ev.clientY >= pane.top &&
+        ev.clientY <= pane.bottom;
+
+      if (!over) {
+        this.target = null;
+        this.hidePreview();
+        return;
+      }
+
+      if (this.grid) {
+        var rect = this.grid.getBoundingClientRect();
+        var tx = Math.floor((ev.clientX - rect.left) / this.m.scale / this.m.strideX);
+        var ty = Math.floor((ev.clientY - rect.top) / this.m.scale / this.m.strideY);
+        tx = Math.max(0, Math.min(this.m.cols - this.w, tx));
+        ty = Math.max(0, Math.min(400 - this.h, ty));
+        if (this.collides(tx, ty)) {
+          this.target = null;
+          this.hidePreview();
+        } else {
+          this.target = { x: tx, y: ty };
+          this.showGridPreview(tx, ty);
+        }
+      } else if (this.canvas) {
+        var crect = this.canvas.getBoundingClientRect();
+        var scale = this.canvas.offsetWidth ? crect.width / this.canvas.offsetWidth : 1;
+        var fx = Math.max(0, Math.round((ev.clientX - crect.left) / scale));
+        var fy = Math.max(0, Math.round((ev.clientY - crect.top) / scale));
+        this.target = { fx: fx, fy: fy };
+        this.showCanvasPreview(fx, fy);
+      }
+    },
+
+    previewEl(parent) {
+      if (!this.preview) {
+        var el = document.createElement("div");
+        el.setAttribute("aria-hidden", "true");
+        el.style.cssText =
+          "pointer-events:none;box-sizing:border-box;z-index:45;" +
+          "border:2px dashed var(--color-primary,#6366f1);border-radius:0.5rem;" +
+          "background:color-mix(in srgb, var(--color-primary,#6366f1) 14%, transparent);";
+        parent.appendChild(el);
+        this.preview = el;
+      }
+      this.preview.style.display = "";
+      return this.preview;
+    },
+
+    showGridPreview(x, y) {
+      var el = this.previewEl(this.grid);
+      el.style.position = "";
+      el.style.gridColumn = x + 1 + " / span " + this.w;
+      el.style.gridRow = y + 1 + " / span " + this.h;
+    },
+
+    showCanvasPreview(fx, fy) {
+      var el = this.previewEl(this.canvas);
+      el.style.position = "absolute";
+      el.style.left = fx + "px";
+      el.style.top = fy + "px";
+      el.style.width = this.defW * 120 + "px";
+      el.style.height = this.defH * 140 + "px";
+    },
+
+    hidePreview() {
+      if (this.preview) this.preview.style.display = "none";
+    },
+
+    drop() {
+      var wasDragging = this.dragging;
+      var target = this.target;
+      var key = this.key;
+      var grid = !!this.grid;
+      this.cleanup();
+      if (!wasDragging) return;
+      this.suppressUntil = performance.now() + 350;
+      if (!target) return;
+      if (grid) {
+        this.pushEvent("add_widget_at", { key: key, x: target.x, y: target.y });
+      } else {
+        this.pushEvent("add_widget_px", { key: key, fx: target.fx, fy: target.fy });
+      }
+    },
+
+    cancel() {
+      if (this.dragging) this.suppressUntil = performance.now() + 350;
+      this.cleanup();
+    },
+
+    cleanup() {
+      if (this.ghost) {
+        this.ghost.remove();
+        this.ghost = null;
+      }
+      if (this.preview) {
+        this.preview.remove();
+        this.preview = null;
+      }
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      if (this._onMove) document.removeEventListener("pointermove", this._onMove);
+      if (this._onUp) document.removeEventListener("pointerup", this._onUp);
+      if (this._onCancel) document.removeEventListener("pointercancel", this._onCancel);
+      this._onMove = this._onUp = this._onCancel = null;
+      this.active = false;
+      this.dragging = false;
+      this.target = null;
+      this.entry = null;
+      this.grid = null;
+      this.canvas = null;
+      this.pane = null;
+    }
+  };
+
   // `DashboardFreeFit` — scales the free canvas to FILL the available width
   // (fit-to-width), times an optional manual `data-zoom` multiplier. Vertical
   // overflow scrolls. Uses `transform: scale` (not CSS `zoom`) so the drag/resize
