@@ -66,8 +66,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   def mount(_params, _session, socket) do
     # Safety net: reveal the grid at the default tier if the DashboardBreakpoint
     # hook never reports (JS present but the hook/asset failed) — a stuck-invisible
-    # dashboard is worse than the default tier. The hook still wins if it's faster.
-    if connected?(socket), do: Process.send_after(self(), :reveal_grid_fallback, 800)
+    # dashboard is worse than the default tier. This must NOT race a slow-but-
+    # working load (cold asset cache, heavy widget queries): losing that race
+    # flashes the desktop tier before the detected one snaps in. A no-JS browser
+    # is revealed instantly by the <noscript> style, so this timer only serves
+    # the broken-asset case — it can afford to be generous.
+    if connected?(socket), do: Process.send_after(self(), :reveal_grid_fallback, 4000)
 
     {:ok,
      socket
