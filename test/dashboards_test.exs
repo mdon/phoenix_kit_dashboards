@@ -288,6 +288,27 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert %{"w" => 2, "h" => 1} = Dashboards.resolve_placement(tiny2, clock, "desktop")
     end
 
+    test "min_override drops the recommended floor to 1x1 for that instance", %{
+      dashboard: dashboard
+    } do
+      {:ok, d} = Dashboards.add_widget(dashboard, "core.clock")
+      clock = List.last(d.layout)["id"]
+      {:ok, d} = Dashboards.configure_widget(d, clock, %{view: "analog"})
+
+      # Recommended floor holds…
+      {:ok, held} = Dashboards.resize_widget(d, clock, "desktop", 1, 1)
+      assert %{"w" => 2, "h" => 2} = Dashboards.resolve_placement(held, clock, "desktop")
+
+      # …until the user opts out; turning it back on restores the floor.
+      {:ok, d} = Dashboards.configure_widget(held, clock, %{min_override: true})
+      {:ok, tiny} = Dashboards.resize_widget(d, clock, "desktop", 1, 1)
+      assert %{"w" => 1, "h" => 1} = Dashboards.resolve_placement(tiny, clock, "desktop")
+
+      {:ok, d} = Dashboards.configure_widget(tiny, clock, %{min_override: false})
+      {:ok, restored} = Dashboards.resize_widget(d, clock, "desktop", 1, 1)
+      assert %{"w" => 2, "h" => 2} = Dashboards.resolve_placement(restored, clock, "desktop")
+    end
+
     test "switching to a view with a larger minimum grows the placement where free", %{
       dashboard: dashboard
     } do

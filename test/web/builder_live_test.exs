@@ -456,6 +456,31 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       refute_activity_logged("dashboard.widget_configured", resource_uuid: dashboard.uuid)
     end
 
+    test "the Allow-smaller checkbox + a small size persist in ONE save", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.clock")
+      [%{"id" => id}] = dashboard.layout
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      render_hook(view, "set_bp", %{"bp" => "desktop"})
+      view |> element("button[phx-click='open_settings'][phx-value-id='#{id}']") |> render_click()
+
+      # Opt out of the floor and shrink below it in the same submit — configure
+      # (incl. the override) runs before the resize, so the drop applies.
+      view
+      |> form("form[phx-submit='save_settings']", %{
+        "min_override" => "true",
+        "w" => "1",
+        "h" => "1"
+      })
+      |> render_submit()
+
+      reloaded = Dashboards.get(dashboard.uuid)
+      assert [%{"min_override" => true}] = reloaded.layout
+      assert %{"w" => 1, "h" => 1} = Dashboards.resolve_placement(reloaded, id, "desktop")
+    end
+
     test "the Settings modal W×H inputs resize the widget (no-hook fallback)", %{conn: conn} do
       {conn, user} = sign_in(conn)
       dashboard = fixture_dashboard(user.uuid)

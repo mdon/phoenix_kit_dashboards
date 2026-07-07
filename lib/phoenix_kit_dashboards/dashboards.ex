@@ -738,8 +738,10 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   @doc """
-  Update a single widget instance's config — its `:settings` map and/or its
-  selected `:view` — in one write. Logs a `dashboard.widget_configured` activity.
+  Update a single widget instance's config — its `:settings` map, its selected
+  `:view`, and/or its `:min_override` flag (opt out of the recommended minimum
+  size: the resize floor drops to 1x1 and view-switch growth is skipped) — in
+  one write. Logs a `dashboard.widget_configured` activity.
   """
   @spec configure_widget(
           Dashboard.t(),
@@ -764,6 +766,7 @@ defmodule PhoenixKitDashboards.Dashboards do
           inst
           |> put_attr(attrs, :settings, "settings")
           |> put_attr(attrs, :view, "view")
+          |> put_attr(attrs, :min_override, "min_override")
 
         inst ->
           inst
@@ -974,14 +977,20 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   # Min/max span bounds for an INSTANCE — the min comes from its selected view
   # when that view declares one (`Widget.min_size_for/2`; an analog clock has a
-  # squarer floor than a text one), falling back to sane defaults when the type
-  # is unknown (a stale instance whose provider was uninstalled).
+  # squarer floor than a text one). The per-instance `min_override` drops the
+  # floor to 1x1: minimums are RECOMMENDATIONS (content renders degraded below
+  # them), and a user cramming a dense dashboard may opt out. Falls back to
+  # sane defaults when the type is unknown (a stale instance whose provider was
+  # uninstalled).
   defp size_bounds(item) do
     case Registry.get(item["widget_key"]) do
-      %Widget{} = widget -> {Widget.min_size_for(widget, item["view"]), widget.max_size}
+      %Widget{} = widget -> {instance_min(item, widget), widget.max_size}
       _ -> {%{w: 1, h: 1}, %{w: Breakpoints.max_cols(), h: 8}}
     end
   end
+
+  defp instance_min(%{"min_override" => true}, _widget), do: %{w: 1, h: 1}
+  defp instance_min(item, widget), do: Widget.min_size_for(widget, item["view"])
 
   defp clamp(value, lo, hi) when is_integer(value), do: value |> max(lo) |> min(hi)
   defp clamp(_value, lo, _hi), do: lo

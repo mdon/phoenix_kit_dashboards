@@ -374,6 +374,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     attrs =
       %{settings: params["settings"] || %{}}
       |> maybe_put_view(params["view"])
+      |> maybe_put_min_override(params["min_override"])
 
     socket = assign(socket, :settings_instance, nil)
 
@@ -527,6 +528,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   defp maybe_put_view(attrs, nil), do: attrs
   defp maybe_put_view(attrs, ""), do: attrs
   defp maybe_put_view(attrs, view), do: Map.put(attrs, :view, view)
+
+  # The "Allow smaller than recommended" checkbox (grid mode only; absent in
+  # the pixel form → leave the flag untouched).
+  defp maybe_put_min_override(attrs, nil), do: attrs
+
+  defp maybe_put_min_override(attrs, val),
+    do: Map.put(attrs, :min_override, val in [true, "true"])
 
   # Assign the updated dashboard on a successful layout write; a rare `{:error, _}`
   # (transient DB failure) is a no-op rather than a `MatchError` crash.
@@ -1071,10 +1079,14 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # range for an instance whose provider is no longer installed.
   defp widget_size_bounds(inst) do
     case Registry.get(inst["widget_key"]) do
-      %Widget{} = widget -> {Widget.min_size_for(widget, inst["view"]), widget.max_size}
+      %Widget{} = widget -> {instance_min(inst, widget), widget.max_size}
       _ -> {%{w: 1, h: 1}, %{w: Breakpoints.max_cols(), h: 8}}
     end
   end
+
+  # Mirrors the context: the per-instance override drops the recommended floor.
+  defp instance_min(%{"min_override" => true}, _widget), do: %{w: 1, h: 1}
+  defp instance_min(inst, widget), do: Widget.min_size_for(widget, inst["view"])
 
   # Grid mode: explicit cell placement — `x`/`y` (0-based, from the resolved
   # placement, which always carries them) anchor the card, spanning `w`×`h`.
@@ -1315,11 +1327,14 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
               />
             </div>
             <div :if={!@free?} class="grid grid-cols-4 items-end gap-2">
+              <%!-- min is HTML-permissive (1): the real floor is server-clamped,
+              and the "Allow smaller" checkbox in this same submit may drop it —
+              a strict min attr would block that save via native validation. --%>
               <.input
                 type="number"
                 name="w"
                 value={@grid_w}
-                min={@limits.min_w}
+                min="1"
                 max={@limits.max_w}
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Width")}
               />
@@ -1327,7 +1342,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 type="number"
                 name="h"
                 value={@grid_h}
-                min={@limits.min_h}
+                min="1"
                 max={@limits.max_h}
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Height")}
               />
@@ -1347,6 +1362,19 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 max={max(@max_rows - @grid_h + 1, 1)}
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Row")}
               />
+            </div>
+            <div :if={!@free?} class="mt-2">
+              <.checkbox
+                name="min_override"
+                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Allow smaller than recommended")}
+                checked={@instance["min_override"] == true}
+              />
+              <p class="mt-0.5 text-xs text-base-content/50">
+                {Gettext.gettext(
+                  PhoenixKitWeb.Gettext,
+                  "Drops this widget's minimum size to 1×1 — it may render cramped below the recommended size."
+                )}
+              </p>
             </div>
             <p class="mt-1 text-xs text-base-content/50">
               {if @free?,
