@@ -482,31 +482,40 @@ defmodule PhoenixKitDashboards.Dashboards do
 
     layout =
       Enum.map(dashboard.layout, fn
-        %{"id" => ^instance_id} = inst ->
-          bounds = size_bounds(inst["widget_key"])
-          placement = Layout.placement(inst, bp)
-
-          case {placement["x"], placement["y"]} do
-            {x, y} when is_integer(x) and is_integer(y) ->
-              {w2, h2} = Grid.fit_size(x, y, w, h, placement["h"], others, cols, bounds)
-              Layout.put_placement(inst, bp, %{"w" => w2, "h" => h2})
-
-            _ ->
-              # Unplaced (shouldn't survive materialize_grid; defensive): plain
-              # bounds clamp.
-              {min, max} = bounds
-
-              Layout.put_placement(inst, bp, %{
-                "w" => clamp(w, min.w, min(max.w, cols)),
-                "h" => clamp(h, min.h, max.h)
-              })
-          end
-
-        inst ->
-          inst
+        %{"id" => ^instance_id} = inst -> resize_instance(inst, bp, w, h, others, cols)
+        inst -> inst
       end)
 
     save_customized(dashboard, layout, bp)
+  end
+
+  defp resize_instance(inst, bp, w, h, others, cols) do
+    bounds = size_bounds(inst)
+    placement = Layout.placement(inst, bp)
+
+    case {placement["x"], placement["y"]} do
+      {x, y} when is_integer(x) and is_integer(y) ->
+        {w2, h2} = Grid.fit_size(x, y, w, h, placement["h"], others, cols, bounds)
+
+        # fit_size floors at the view's min — when even that floor doesn't fit
+        # (a raised per-view minimum in a tight corner), keep the current size
+        # rather than overlap a neighbour.
+        if Grid.collides?(x, y, w2, h2, others) do
+          inst
+        else
+          Layout.put_placement(inst, bp, %{"w" => w2, "h" => h2})
+        end
+
+      _ ->
+        # Unplaced (shouldn't survive materialize_grid; defensive): plain
+        # bounds clamp.
+        {min, max} = bounds
+
+        Layout.put_placement(inst, bp, %{
+          "w" => clamp(w, min.w, min(max.w, cols)),
+          "h" => clamp(h, min.h, max.h)
+        })
+    end
   end
 
   @doc """
@@ -760,6 +769,11 @@ defmodule PhoenixKitDashboards.Dashboards do
           inst
       end)
 
+    layout =
+      if Map.has_key?(attrs, :view),
+        do: grow_for_view(layout, instance_id),
+        else: layout
+
     dashboard
     |> save_layout(layout)
     |> log_on_ok("dashboard.widget_configured", opts, %{"instance_id" => instance_id})
@@ -769,6 +783,56 @@ defmodule PhoenixKitDashboards.Dashboards do
     case Map.fetch(attrs, key) do
       {:ok, value} -> Map.put(inst, string_key, value)
       :error -> inst
+    end
+  end
+
+  # Switching to a view with a larger minimum (e.g. text clock → analog) grows
+  # every stored placement of that instance to meet it — per tier, and only
+  # where the grid has room: a blocked or edge-tight tier keeps its size (the
+  # view still renders, just smaller than its ideal floor).
+  defp grow_for_view(layout, instance_id) do
+    case Enum.find(layout, &(&1["id"] == instance_id)) do
+      nil -> layout
+      item -> swap_item(layout, instance_id, grow_all_tiers(item, layout))
+    end
+  end
+
+  defp grow_all_tiers(item, layout) do
+    {min, _max} = size_bounds(item)
+    Enum.reduce(Map.keys(item["bp"] || %{}), item, &grow_on_tier(&2, &1, min, layout))
+  end
+
+  defp swap_item(layout, instance_id, replacement) do
+    Enum.map(layout, fn i -> if i["id"] == instance_id, do: replacement, else: i end)
+  end
+
+  defp grow_on_tier(item, bp, min, layout) do
+    cols = Breakpoints.cols(bp)
+    p = Layout.placement(item, bp)
+    w = max(p["w"], min(min.w, cols))
+    h = max(p["h"], min.h)
+
+    cond do
+      w == p["w"] and h == p["h"] ->
+        item
+
+      is_integer(p["x"]) and is_integer(p["y"]) ->
+        others =
+          layout
+          |> Enum.reject(&(&1["id"] == item["id"]))
+          |> Enum.map(&Layout.placement(&1, bp))
+
+        if p["x"] + w <= cols and p["y"] + h <= Grid.max_rows() and
+             not Grid.collides?(p["x"], p["y"], w, h, others) do
+          Layout.put_placement(item, bp, %{"w" => w, "h" => h})
+        else
+          item
+        end
+
+      true ->
+        # Order-only legacy placement — no cells to collide with yet; the packer
+        # places the grown span on next render.
+        Layout.put_placement(item, bp, %{"w" => w, "h" => h})
     end
   end
 
@@ -908,11 +972,13 @@ defmodule PhoenixKitDashboards.Dashboards do
     |> repo().update()
   end
 
-  # Min/max span bounds for a widget type, falling back to sane defaults when the
-  # type is unknown (a stale instance whose provider was uninstalled).
-  defp size_bounds(widget_key) do
-    case Registry.get(widget_key) do
-      %Widget{min_size: min, max_size: max} -> {min, max}
+  # Min/max span bounds for an INSTANCE — the min comes from its selected view
+  # when that view declares one (`Widget.min_size_for/2`; an analog clock has a
+  # squarer floor than a text one), falling back to sane defaults when the type
+  # is unknown (a stale instance whose provider was uninstalled).
+  defp size_bounds(item) do
+    case Registry.get(item["widget_key"]) do
+      %Widget{} = widget -> {Widget.min_size_for(widget, item["view"]), widget.max_size}
       _ -> {%{w: 1, h: 1}, %{w: Breakpoints.max_cols(), h: 8}}
     end
   end

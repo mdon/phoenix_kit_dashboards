@@ -22,7 +22,13 @@ Two core ideas:
 - `PhoenixKitDashboards` — `PhoenixKit.Module` callbacks (tab, permission,
   enable/disable, `version`, `css_sources`, `get_config`).
 - `PhoenixKitDashboards.Widget` — the widget **type** struct + `from_map/2`
-  normalization of the plain-map provider contract.
+  normalization of the plain-map provider contract. Views may declare a per-view
+  `min_size` (`min_size_for/2`); resize limits, the settings modal, and view
+  switching (which auto-grows the placement where the grid has room) all honour
+  the selected view's floor. `Widgets.ClockWidget` is the worked example:
+  normal/digital/analog views (analog floors at 2×2), per-instance timezone
+  (fixed UTC offsets always; IANA city zones only when the host configures a tz
+  database) and a show/hide-timezone toggle.
 - `PhoenixKitDashboards.Registry` — convention-based discovery (queries
   `PhoenixKit.ModuleRegistry`, calls `phoenix_kit_widgets/0` on exporters),
   cached in `:persistent_term`, filtered by module enablement + permissions.

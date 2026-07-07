@@ -68,7 +68,9 @@ defmodule PhoenixKitDashboards.Widget do
             # Optional named render variants (e.g. detailed vs simple vs color
             # grid). Empty = a single intrinsic view. The selected view key +
             # the instance's size are handed to the component so one widget can
-            # render several densities/layouts.
+            # render several densities/layouts. A view may declare its own
+            # `min_size` (an analog clock needs a squarer floor than a text
+            # one) — resolved via `min_size_for/2`.
             views: [],
             # Live refresh: when set (milliseconds), the host periodically
             # `send_update/2`s the widget so it re-queries. nil = static.
@@ -80,7 +82,11 @@ defmodule PhoenixKitDashboards.Widget do
 
   @type size :: %{w: pos_integer(), h: pos_integer()}
 
-  @type view :: %{required(:key) => String.t(), required(:name) => String.t()}
+  @type view :: %{
+          required(:key) => String.t(),
+          required(:name) => String.t(),
+          optional(:min_size) => size()
+        }
 
   @type settings_field :: %{
           required(:key) => String.t(),
@@ -142,7 +148,7 @@ defmodule PhoenixKitDashboards.Widget do
          min_size: min_size,
          max_size: max_size,
          settings_schema: normalize_settings_schema(map[:settings_schema]),
-         views: normalize_views(map[:views]),
+         views: normalize_views(map[:views], max_size),
          refresh_interval: normalize_interval(map[:refresh_interval]),
          category: map[:category] || "General",
          source: source
@@ -179,17 +185,50 @@ defmodule PhoenixKitDashboards.Widget do
   def default_view(%__MODULE__{views: [%{key: key} | _]}), do: key
   def default_view(%__MODULE__{}), do: nil
 
-  # Normalize provider-supplied `:views` (plain maps with :key/:name) into
-  # `[%{key: String, name: String}]`, dropping malformed entries.
-  defp normalize_views(views) when is_list(views) do
-    for v <- views, is_map(v), v[:key] || v["key"] do
-      key = v[:key] || v["key"]
-      name = v[:name] || v["name"] || to_string(key)
-      %{key: to_string(key), name: to_string(name)}
+  @doc """
+  The minimum size for an instance showing `view_key` — the view's own
+  `min_size` when it declares one (an analog clock needs more room than a text
+  one), else the widget type's. `nil` resolves through the default view, so
+  instances created before a widget declared views get the right floor too.
+  """
+  @spec min_size_for(t(), String.t() | nil) :: size()
+  def min_size_for(%__MODULE__{} = widget, nil) do
+    case default_view(widget) do
+      nil -> widget.min_size
+      key -> min_size_for(widget, key)
     end
   end
 
-  defp normalize_views(_), do: []
+  def min_size_for(%__MODULE__{} = widget, view_key) do
+    case Enum.find(widget.views, &(&1.key == view_key)) do
+      %{min_size: min} -> min
+      _ -> widget.min_size
+    end
+  end
+
+  # Normalize provider-supplied `:views` (plain maps with :key/:name and an
+  # optional per-view :min_size) into `[%{key: String, name: String[, min_size:
+  # size]}]`, dropping malformed entries. A view's min is clamped into
+  # [1, the widget's max] per dimension so the resize limits stay coherent.
+  defp normalize_views(views, max_size) when is_list(views) do
+    for v <- views, is_map(v), v[:key] || v["key"] do
+      key = v[:key] || v["key"]
+      name = v[:name] || v["name"] || to_string(key)
+      put_view_min(%{key: to_string(key), name: to_string(name)}, v, max_size)
+    end
+  end
+
+  defp normalize_views(_, _max_size), do: []
+
+  defp put_view_min(view, raw, max_size) do
+    case raw[:min_size] || raw["min_size"] do
+      %{w: w, h: h} when is_integer(w) and is_integer(h) ->
+        Map.put(view, :min_size, %{w: clamp(w, 1, max_size.w), h: clamp(h, 1, max_size.h)})
+
+      _ ->
+        view
+    end
+  end
 
   @valid_field_types [:string, :text, :number, :boolean, :select]
 

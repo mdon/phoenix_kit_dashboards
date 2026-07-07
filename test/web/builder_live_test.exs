@@ -383,7 +383,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       # Drive the periodic tick directly; the clock widget must re-render live.
       send(view.pid, :refresh_tick)
       html = render(view)
-      assert html =~ "Server time"
+      assert html =~ ~r/\d{2}:\d{2}:\d{2}/
       assert Process.alive?(view.pid)
     end
 

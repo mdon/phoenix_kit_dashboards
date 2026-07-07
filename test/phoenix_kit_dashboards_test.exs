@@ -164,6 +164,56 @@ defmodule PhoenixKitDashboardsTest do
       assert Widget.default_view(widget) == nil
     end
 
+    test "a view may declare its own min_size, clamped into the widget's max" do
+      {:ok, widget} =
+        Widget.from_map(
+          %{
+            key: "x.y",
+            name: "Y",
+            component: DummyComponent,
+            min_size: %{w: 2, h: 1},
+            max_size: %{w: 8, h: 4},
+            views: [
+              %{key: "text", name: "Text"},
+              %{key: "big", name: "Big", min_size: %{w: 4, h: 3}},
+              %{key: "huge", name: "Huge", min_size: %{w: 99, h: 99}},
+              %{key: "junk", name: "Junk", min_size: "nope"}
+            ]
+          },
+          :prov
+        )
+
+      # Per-view min honoured; oversize clamps to the widget max; junk dropped.
+      assert Widget.min_size_for(widget, "big") == %{w: 4, h: 3}
+      assert Widget.min_size_for(widget, "huge") == %{w: 8, h: 4}
+      # Views without (or with malformed) min fall back to the widget's min.
+      assert Widget.min_size_for(widget, "text") == %{w: 2, h: 1}
+      assert Widget.min_size_for(widget, "junk") == %{w: 2, h: 1}
+      # An unknown view and nil (→ default view "text") fall back too.
+      assert Widget.min_size_for(widget, "ghost") == %{w: 2, h: 1}
+      assert Widget.min_size_for(widget, nil) == %{w: 2, h: 1}
+    end
+
+    test "min_size_for(nil) resolves through the default view's own min" do
+      {:ok, widget} =
+        Widget.from_map(
+          %{
+            key: "x.y",
+            name: "Y",
+            component: DummyComponent,
+            min_size: %{w: 2, h: 1},
+            views: [%{key: "first", name: "First", min_size: %{w: 5, h: 2}}]
+          },
+          :prov
+        )
+
+      # An instance created before views existed (view nil) uses the default
+      # view's floor, and a widget with no views at all uses its own min.
+      assert Widget.min_size_for(widget, nil) == %{w: 5, h: 2}
+      {:ok, plain} = Widget.from_map(%{key: "p", name: "P", component: DummyComponent}, :prov)
+      assert Widget.min_size_for(plain, nil) == plain.min_size
+    end
+
     test "drops a non-map provider entry rather than crashing discovery" do
       assert {:error, :not_a_map} = Widget.from_map("oops", :prov)
       assert {:error, :not_a_map} = Widget.from_map(nil, :prov)

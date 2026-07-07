@@ -271,6 +271,54 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert %{"w" => 4} = Layout.placement(hd(phone.layout), "phone")
     end
 
+    test "the resize floor follows the instance's selected VIEW (per-view min_size)", %{
+      dashboard: dashboard
+    } do
+      # An analog clock's floor is 2x2; a normal one's is 2x1.
+      {:ok, d} = Dashboards.add_widget(dashboard, "core.clock")
+      clock = List.last(d.layout)["id"]
+      {:ok, d} = Dashboards.configure_widget(d, clock, %{view: "analog"})
+
+      {:ok, tiny} = Dashboards.resize_widget(d, clock, "desktop", 1, 1)
+      placement = Dashboards.resolve_placement(tiny, clock, "desktop")
+      assert %{"w" => 2, "h" => 2} = placement
+
+      {:ok, d} = Dashboards.configure_widget(tiny, clock, %{view: "normal"})
+      {:ok, tiny2} = Dashboards.resize_widget(d, clock, "desktop", 1, 1)
+      assert %{"w" => 2, "h" => 1} = Dashboards.resolve_placement(tiny2, clock, "desktop")
+    end
+
+    test "switching to a view with a larger minimum grows the placement where free", %{
+      dashboard: dashboard
+    } do
+      {:ok, d} = Dashboards.add_widget(dashboard, "core.clock")
+      clock = List.last(d.layout)["id"]
+      # Shrink to the normal view's floor (3x1 keeps digital legal too).
+      {:ok, d} = Dashboards.resize_widget(d, clock, "desktop", 3, 1)
+      assert %{"h" => 1} = Dashboards.resolve_placement(d, clock, "desktop")
+
+      # Analog needs 2x2 → the switch grows the height in place.
+      {:ok, grown} = Dashboards.configure_widget(d, clock, %{view: "analog"})
+      assert %{"w" => 3, "h" => 2} = Dashboards.resolve_placement(grown, clock, "desktop")
+    end
+
+    test "view-switch growth is skipped where a neighbour blocks it", %{dashboard: dashboard} do
+      # The setup note sits at (0,0); park the clock beside it on row 0.
+      {:ok, d} = Dashboards.add_widget(dashboard, "core.clock")
+      clock = List.last(d.layout)["id"]
+      {:ok, d} = Dashboards.place_widget_grid(d, clock, "desktop", 5, 0)
+      {:ok, d} = Dashboards.resize_widget(d, clock, "desktop", 3, 1)
+
+      # A note parked directly below blocks the analog growth into row 1.
+      {:ok, d} = Dashboards.add_widget(d, "core.note")
+      note = List.last(d.layout)["id"]
+      {:ok, d} = Dashboards.place_widget_grid(d, note, "desktop", 5, 1)
+
+      {:ok, kept} = Dashboards.configure_widget(d, clock, %{view: "analog"})
+      # Blocked → keeps 3x1 (the analog face just renders smaller than ideal).
+      assert %{"w" => 3, "h" => 1} = Dashboards.resolve_placement(kept, clock, "desktop")
+    end
+
     test "grows until blocked by a neighbouring widget, never onto it", %{
       dashboard: dashboard,
       id: id
@@ -333,8 +381,8 @@ defmodule PhoenixKitDashboards.DashboardsTest do
 
       clock = List.last(added.layout)
       assert clock["widget_key"] == "core.clock"
-      # core.clock default 3x1, placed exactly where dropped.
-      assert %{"x" => 5, "y" => 4, "w" => 3, "h" => 1} = Layout.placement(clock, "desktop")
+      # core.clock default 3x2, placed exactly where dropped.
+      assert %{"x" => 5, "y" => 4, "w" => 3, "h" => 2} = Layout.placement(clock, "desktop")
       assert Dashboards.customized?(added, "desktop")
 
       assert_activity_logged("dashboard.widget_added",

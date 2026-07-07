@@ -33,16 +33,31 @@ defmodule PhoenixKitDashboards.Widgets do
       %{
         key: "core.clock",
         name: "Clock",
-        description: "Current server time.",
+        description: "Current time — normal, digital or analog, with a per-clock timezone.",
         icon: "hero-clock",
         component: ClockWidget,
-        default_size: %{w: 3, h: 1},
+        default_size: %{w: 3, h: 2},
         min_size: %{w: 2, h: 1},
         # Ticks live — the host re-renders it every second.
         refresh_interval: 1000,
+        # Each view carries its own minimum: the analog face needs a squarer
+        # box than a line of digits (the per-view min_size API demo).
+        views: [
+          %{key: "normal", name: "Normal", min_size: %{w: 2, h: 1}},
+          %{key: "digital", name: "Digital", min_size: %{w: 3, h: 1}},
+          %{key: "analog", name: "Analog", min_size: %{w: 2, h: 2}}
+        ],
         category: "Built-in",
         settings_schema: [
-          %{key: "label", type: :string, label: "Label", default: "Server time"}
+          %{key: "label", type: :string, label: "Label", default: ""},
+          %{
+            key: "timezone",
+            type: :select,
+            label: "Timezone",
+            options: ClockWidget.timezone_options(),
+            default: "UTC"
+          },
+          %{key: "show_timezone", type: :boolean, label: "Show timezone", default: true}
         ]
       },
       %{

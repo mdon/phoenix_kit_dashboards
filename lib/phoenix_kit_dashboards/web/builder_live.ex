@@ -1021,7 +1021,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # placement span + the widget type's min/max clamped to the active breakpoint's
   # columns. Pixel: the default-bp span (unused by the pixel resize, which uses px).
   defp card_limits(%{mode: "grid", inst: inst, placement: placement, active_bp: bp}) do
-    {min, max} = widget_size_bounds(inst["widget_key"])
+    {min, max} = widget_size_bounds(inst)
     cols = Breakpoints.cols(bp)
     p = placement || %{}
 
@@ -1049,7 +1049,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     p = Layout.placement(inst, bp)
     w = p["w"] |> to_int(4) |> clamp(1, cols)
     h = p["h"] |> to_int(2) |> max(1)
-    {min, max} = widget_size_bounds(inst["widget_key"])
+    {min, max} = widget_size_bounds(inst)
 
     %{w: w, h: h, min_w: min(min.w, cols), max_w: min(max.w, cols), min_h: min.h, max_h: max.h}
   end
@@ -1066,11 +1066,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   defp bp_icon("phone"), do: "hero-device-phone-mobile"
   defp bp_icon(_), do: "hero-squares-2x2"
 
-  # Min/max span for a widget type (mirrors the context's clamp); falls back to a
-  # permissive range for an instance whose provider is no longer installed.
-  defp widget_size_bounds(widget_key) do
-    case Registry.get(widget_key) do
-      %Widget{min_size: min, max_size: max} -> {min, max}
+  # Min/max span for an instance — the min follows its selected view when that
+  # view declares one (mirrors the context's clamp); falls back to a permissive
+  # range for an instance whose provider is no longer installed.
+  defp widget_size_bounds(inst) do
+    case Registry.get(inst["widget_key"]) do
+      %Widget{} = widget -> {Widget.min_size_for(widget, inst["view"]), widget.max_size}
       _ -> {%{w: 1, h: 1}, %{w: Breakpoints.max_cols(), h: 8}}
     end
   end
