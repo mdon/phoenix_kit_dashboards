@@ -531,6 +531,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   defp maybe_place(dashboard, _id, _bp, _params), do: {:ok, dashboard}
 
+  # See the render comment: counters daisyUI's modal-open `scrollbar-gutter:
+  # stable` (equal specificity, later in the document wins).
+  defp gutter_fix_style do
+    Phoenix.HTML.raw("<style>:root:has(.modal-open){scrollbar-gutter:auto}</style>")
+  end
+
   # Pulse the just-moved widget green/red (`sortable:flash`, answered by the
   # DashboardGridDrag hook).
   defp flash_sortable(socket, nil, _status), do: socket
@@ -558,6 +564,14 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     PAGE and pop a window scrollbar — the builder is app-like, its grid/canvas
     panes scroll internally instead. --%>
     <div class="flex h-[calc(100dvh-4rem)] flex-col">
+      <%!-- daisyUI's `:root:has(.modal-open)` sets `scrollbar-gutter: stable` with
+      the page lock, reserving a ~15px gutter on a page with nothing to scroll —
+      the fixed modal backdrop then sizes against the REDUCED containing block and
+      leaves an uncovered strip at the right edge (grey in Chrome, white in
+      Firefox — looks like a phantom scrollbar). This page is viewport-locked, so
+      the gutter is pure artifact: counter it at equal specificity (later in the
+      document wins). --%>
+      {gutter_fix_style()}
       <div class="flex items-center justify-between px-4 py-3 border-b border-base-300">
         <div class="flex items-center gap-3">
           <.link navigate={Paths.index()} class="btn btn-ghost btn-sm">

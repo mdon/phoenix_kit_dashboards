@@ -174,6 +174,11 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
   defp scope_label("role"), do: Gettext.gettext(PhoenixKitWeb.Gettext, "role")
   defp scope_label(other), do: other
 
+  # Counters daisyUI's modal-open `scrollbar-gutter: stable` — see BuilderLive.
+  defp gutter_fix_style do
+    Phoenix.HTML.raw("<style>:root:has(.modal-open){scrollbar-gutter:auto}</style>")
+  end
+
   defp blank_to_default(nil, default), do: default
   defp blank_to_default("", default), do: default
   defp blank_to_default(value, _default), do: value
@@ -182,6 +187,10 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
   def render(assigns) do
     ~H"""
     <div class="flex flex-col mx-auto max-w-5xl px-4 py-6 gap-6">
+      <%!-- Counter daisyUI's modal-open scrollbar-gutter reservation — see the
+      builder's comment (the create modal here has the same phantom right-edge
+      strip on pages without a scrollbar). --%>
+      {gutter_fix_style()}
       <div class="flex items-center justify-between">
         <h1 class="text-2xl font-semibold">{Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboards")}</h1>
         <button type="button" phx-click="open_create" class="btn btn-primary btn-sm">
