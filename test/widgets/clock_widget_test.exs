@@ -25,6 +25,16 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidgetTest do
       assert_in_delta DateTime.diff(half, now), 5 * 3600 + 30 * 60, 3
     end
 
+    test "impossible offsets degrade to UTC instead of shifting by days" do
+      assert {_dt, "UTC"} = ClockWidget.resolve_time("UTC+99")
+      assert {_dt, "UTC"} = ClockWidget.resolve_time("UTC+99:99")
+      assert {_dt, "UTC"} = ClockWidget.resolve_time("UTC+5:99")
+      assert {_dt, "UTC"} = ClockWidget.resolve_time("UTC-13")
+      # …but the real-world extremes stay valid.
+      assert {_dt, "UTC+14"} = ClockWidget.resolve_time("UTC+14")
+      assert {_dt, "UTC-12"} = ClockWidget.resolve_time("UTC-12")
+    end
+
     test "an IANA zone degrades to UTC when the host has no tz database" do
       # This test env deliberately has no tzdata; with one configured the same
       # call returns the shifted time + the zone abbreviation instead.

@@ -61,9 +61,7 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
   def resolve_time(tz) when is_binary(tz) do
     case Regex.named_captures(@offset_re, tz) do
       %{"sign" => sign, "h" => h, "m" => m} ->
-        minutes = String.to_integer(h) * 60 + String.to_integer(blank_zero(m))
-        secs = if(sign == "-", do: -1, else: 1) * minutes * 60
-        {DateTime.add(DateTime.utc_now(), secs, :second), tz}
+        offset_time(tz, sign, String.to_integer(h), String.to_integer(blank_zero(m)))
 
       nil ->
         case DateTime.shift_zone(DateTime.utc_now(), tz) do
@@ -72,6 +70,18 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
         end
     end
   end
+
+  # Real-world offsets only (UTC-12 … UTC+14, minutes 0-59) — a crafted or
+  # stale setting like "UTC+99:99" degrades to UTC instead of rendering a time
+  # shifted by days.
+  defp offset_time(tz, sign, hours, minutes)
+       when minutes in 0..59 and
+              ((sign == "+" and hours <= 14) or (sign == "-" and hours <= 12)) do
+    secs = if(sign == "-", do: -1, else: 1) * (hours * 60 + minutes) * 60
+    {DateTime.add(DateTime.utc_now(), secs, :second), tz}
+  end
+
+  defp offset_time(_tz, _sign, _hours, _minutes), do: {DateTime.utc_now(), "UTC"}
 
   def resolve_time(_), do: {DateTime.utc_now(), "UTC"}
 
