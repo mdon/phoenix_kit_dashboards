@@ -514,6 +514,22 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       document.body.appendChild(clone);
       this.clone = clone;
 
+      // The clone is a static snapshot, but the original stays LiveView-managed
+      // and keeps updating mid-drag (a clock ticks every second) — mirror those
+      // updates into the clone so the copy in your hand doesn't visibly freeze
+      // at grab-time while the drop placeholder ticks on.
+      if (typeof MutationObserver === "function") {
+        this._mirror = new MutationObserver(function () {
+          if (self.clone && self.item) self.clone.innerHTML = self.item.innerHTML;
+        });
+        this._mirror.observe(item, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+          attributes: true
+        });
+      }
+
       // The widget itself is the live drop preview — dimmed + dashed while it
       // tracks the drag cell-by-cell.
       item.style.opacity = "0.35";
@@ -597,6 +613,10 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     },
 
     finish() {
+      if (this._mirror) {
+        this._mirror.disconnect();
+        this._mirror = null;
+      }
       if (this.clone) {
         this.clone.remove();
         this.clone = null;
