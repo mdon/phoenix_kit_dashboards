@@ -201,16 +201,17 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
 
       <.create_modal :if={@show_create} roles={@roles} />
 
-      <div :if={@dashboards == []} class="card bg-base-100 shadow">
-        <div class="card-body items-center text-center text-base-content/60">
-          <.icon name="hero-squares-2x2" class="w-10 h-10" />
-          <p>{Gettext.gettext(PhoenixKitWeb.Gettext, "No dashboards yet.")}</p>
-          <button type="button" phx-click="open_create" class="btn btn-primary btn-sm mt-2">
-            <.icon name="hero-plus" class="w-4 h-4" />
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "Create your first dashboard")}
-          </button>
-        </div>
-      </div>
+      <.empty_state
+        :if={@dashboards == []}
+        variant="featured"
+        icon="hero-squares-2x2"
+        title={Gettext.gettext(PhoenixKitWeb.Gettext, "No dashboards yet.")}
+      >
+        <button type="button" phx-click="open_create" class="btn btn-primary btn-sm">
+          <.icon name="hero-plus" class="w-4 h-4" />
+          {Gettext.gettext(PhoenixKitWeb.Gettext, "Create your first dashboard")}
+        </button>
+      </.empty_state>
 
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div :for={dashboard <- @dashboards} class="card bg-base-100 shadow">
