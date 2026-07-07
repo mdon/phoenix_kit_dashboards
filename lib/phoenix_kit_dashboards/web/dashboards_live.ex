@@ -176,7 +176,10 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
 
   # Counters daisyUI's modal-open `scrollbar-gutter: stable` — see BuilderLive.
   defp gutter_fix_style do
-    Phoenix.HTML.raw("<style>:root:has(.modal-open){scrollbar-gutter:auto}</style>")
+    Phoenix.HTML.raw(
+      "<style>:root:has(.modal-open, .modal[open], .modal:target, .modal-toggle:checked)" <>
+        "{scrollbar-gutter:auto}</style>"
+    )
   end
 
   defp blank_to_default(nil, default), do: default
@@ -278,13 +281,10 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
 
   defp create_modal(assigns) do
     ~H"""
-    <div class="modal modal-open" phx-window-keydown="close_create" phx-key="Escape">
-      <div class="modal-box">
-        <h3 class="font-semibold text-lg mb-4">
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "New dashboard")}
-        </h3>
+    <.modal show={true} on_close="close_create" id="dashboard-create-modal">
+      <:title>{Gettext.gettext(PhoenixKitWeb.Gettext, "New dashboard")}</:title>
 
-        <form phx-submit="create" class="flex flex-col gap-3">
+      <form phx-submit="create" class="flex flex-col gap-3">
           <.input
             type="text"
             name="title"
@@ -333,23 +333,23 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
             options={Enum.map(@roles, &{&1.name, &1.uuid})}
           />
 
-          <div class="modal-action">
-            <button type="button" phx-click="close_create" class="btn btn-ghost">
-              {Gettext.gettext(PhoenixKitWeb.Gettext, "Cancel")}
-            </button>
-            <button
-              type="submit"
-              phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Creating…")}
-              class="btn btn-primary"
-            >
-              <.icon name="hero-plus" class="w-4 h-4" />
-              {Gettext.gettext(PhoenixKitWeb.Gettext, "Create")}
-            </button>
-          </div>
-        </form>
-      </div>
-      <div class="modal-backdrop" phx-click="close_create"></div>
-    </div>
+        <%!-- Buttons stay INSIDE the form (a submit in the modal's actions slot
+        would render outside it) --%>
+        <div class="modal-action">
+          <button type="button" phx-click="close_create" class="btn btn-ghost">
+            {Gettext.gettext(PhoenixKitWeb.Gettext, "Cancel")}
+          </button>
+          <button
+            type="submit"
+            phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Creating…")}
+            class="btn btn-primary"
+          >
+            <.icon name="hero-plus" class="w-4 h-4" />
+            {Gettext.gettext(PhoenixKitWeb.Gettext, "Create")}
+          </button>
+        </div>
+      </form>
+    </.modal>
     """
   end
 end

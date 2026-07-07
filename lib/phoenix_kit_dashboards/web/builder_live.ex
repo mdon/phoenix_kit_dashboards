@@ -620,10 +620,14 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   defp maybe_place(dashboard, _id, _bp, _params), do: {:ok, dashboard}
 
-  # See the render comment: counters daisyUI's modal-open `scrollbar-gutter:
-  # stable` (equal specificity, later in the document wins).
+  # Counters daisyUI's modal/drawer-open `scrollbar-gutter: stable` (the layered
+  # zero-specificity original loses to this unlayered rule). Same rule ships in
+  # core's admin layout now — delete this helper once the core pin includes it.
   defp gutter_fix_style do
-    Phoenix.HTML.raw("<style>:root:has(.modal-open){scrollbar-gutter:auto}</style>")
+    Phoenix.HTML.raw(
+      "<style>:root:has(.modal-open, .modal[open], .modal:target, .modal-toggle:checked)" <>
+        "{scrollbar-gutter:auto}</style>"
+    )
   end
 
   # Pulse the just-moved widget green/red (`sortable:flash`, answered by the
@@ -1331,14 +1335,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       )
 
     ~H"""
-    <div class="modal modal-open">
-      <div class="modal-box">
-        <h3 class="font-semibold text-lg mb-3">
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "Widget settings")}
-          <span :if={@widget} class="text-base-content/50 text-sm">— {@widget.name}</span>
-        </h3>
+    <.modal show={true} on_close="close_settings" id="widget-settings-modal">
+      <:title>
+        {Gettext.gettext(PhoenixKitWeb.Gettext, "Widget settings")}
+        <span :if={@widget} class="text-base-content/50 text-sm">— {@widget.name}</span>
+      </:title>
 
-        <form phx-submit="save_settings" class="flex flex-col gap-3">
+      <form phx-submit="save_settings" class="flex flex-col gap-3">
           <.select
             :if={@widget && @widget.views != []}
             name="view"
@@ -1439,22 +1442,22 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
             field={field}
             value={Map.get(@instance["settings"] || %{}, field.key)}
           />
-          <div class="modal-action">
-            <button type="button" phx-click="close_settings" class="btn btn-ghost btn-sm">
-              {Gettext.gettext(PhoenixKitWeb.Gettext, "Cancel")}
-            </button>
-            <button
-              type="submit"
-              phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Saving…")}
-              class="btn btn-primary btn-sm"
-            >
-              {Gettext.gettext(PhoenixKitWeb.Gettext, "Save")}
-            </button>
-          </div>
-        </form>
-      </div>
-      <div class="modal-backdrop" phx-click="close_settings"></div>
-    </div>
+        <%!-- Buttons stay INSIDE the form (a submit in the modal's actions slot
+        would render outside it) --%>
+        <div class="modal-action">
+          <button type="button" phx-click="close_settings" class="btn btn-ghost btn-sm">
+            {Gettext.gettext(PhoenixKitWeb.Gettext, "Cancel")}
+          </button>
+          <button
+            type="submit"
+            phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Saving…")}
+            class="btn btn-primary btn-sm"
+          >
+            {Gettext.gettext(PhoenixKitWeb.Gettext, "Save")}
+          </button>
+        </div>
+      </form>
+    </.modal>
     """
   end
 
