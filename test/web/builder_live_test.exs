@@ -15,6 +15,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
   defp grid(uuid), do: Layout.placement(hd(Dashboards.get(uuid).layout), "desktop")
   defp pixel(uuid), do: Layout.pixel(hd(Dashboards.get(uuid).layout))
 
+  # Every rendered clock time (HH:MM:SS), in DOM order.
+  defp clock_times(html) do
+    ~r/(\d{2}:\d{2}:\d{2})/ |> Regex.scan(html) |> Enum.map(fn [_, t] -> t end)
+  end
+
   describe "mount" do
     test "renders the builder header + widget catalog for an owned dashboard", %{conn: conn} do
       {conn, user} = sign_in(conn)
@@ -340,6 +345,29 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       html = render(view)
       assert html =~ "Server time"
       assert Process.alive?(view.pid)
+    end
+
+    test "the tick actually advances a live widget — clocks must not freeze", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.clock")
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.clock")
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+
+      # The due-time default must let the FIRST tick fire: monotonic `now` is a
+      # large negative number on the BEAM, so a 0 default froze every live
+      # widget forever (send_update never ran; both clocks stood still).
+      before_times = clock_times(render(view))
+      assert length(before_times) == 2
+
+      # Cross a second boundary, then tick: BOTH clocks must show a new time.
+      Process.sleep(1100)
+      send(view.pid, :refresh_tick)
+      after_times = clock_times(render(view))
+
+      assert length(after_times) == 2
+      assert Enum.all?(Enum.zip(before_times, after_times), fn {b, a} -> a != b end)
     end
   end
 

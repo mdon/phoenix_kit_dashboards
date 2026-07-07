@@ -444,11 +444,16 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # ones — and for widgets the viewer can't see (they render a placeholder, so a
   # send_update would target a component that isn't mounted and log a warning
   # every tick).
+  #
+  # The not-yet-seen default is `now`, NOT 0: `now` is monotonic time, which is
+  # a large NEGATIVE number on the BEAM — against a 0 default the due-check
+  # could never pass, so no widget ever refreshed (the clock only appeared to
+  # tick because unrelated re-renders re-ran its update/2).
   defp refresh_due(inst, acc, now, scope, placements) do
     case Registry.get(inst["widget_key"]) do
       %Widget{refresh_interval: ms} = widget
       when is_integer(ms) ->
-        if now >= Map.get(acc, inst["id"], 0) and Registry.visible_for_scope?(widget, scope) do
+        if now >= Map.get(acc, inst["id"], now) and Registry.visible_for_scope?(widget, scope) do
           send_update(
             widget.component,
             widget_update_assigns(inst, scope, placements[inst["id"]])
@@ -547,7 +552,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="flex flex-col h-full">
+    <%!-- Viewport-bounded (100dvh minus core's h-16 admin header), NOT h-full:
+    the admin layout's column is content-sized, so h-full resolves to auto and
+    any content growth (a fit-rescale, a widget near the fold) would grow the
+    PAGE and pop a window scrollbar — the builder is app-like, its grid/canvas
+    panes scroll internally instead. --%>
+    <div class="flex h-[calc(100dvh-4rem)] flex-col">
       <div class="flex items-center justify-between px-4 py-3 border-b border-base-300">
         <div class="flex items-center gap-3">
           <.link navigate={Paths.index()} class="btn btn-ghost btn-sm">
@@ -1239,7 +1249,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Height")}
               />
             </div>
-            <div :if={!@free?} class="flex items-center gap-2">
+            <div :if={!@free?} class="grid grid-cols-4 items-end gap-2">
               <.input
                 type="number"
                 name="w"
@@ -1248,7 +1258,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 max={@limits.max_w}
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Width")}
               />
-              <span class="mt-6 text-base-content/40">×</span>
               <.input
                 type="number"
                 name="h"
@@ -1257,8 +1266,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 max={@limits.max_h}
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Height")}
               />
-            </div>
-            <div :if={!@free?} class="mt-2 flex items-center gap-2">
               <.input
                 type="number"
                 name="x"
@@ -1267,7 +1274,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 max={max(@cols - @grid_w + 1, 1)}
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Column")}
               />
-              <span class="mt-6 text-base-content/40">/</span>
               <.input
                 type="number"
                 name="y"
