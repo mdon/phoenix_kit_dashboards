@@ -64,6 +64,18 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    # Best case the tier is known BEFORE the first live render: a host whose
+    # LiveSocket passes `viewport_width` in the connect params (see the module
+    # README) tells us the screen at connected mount, so the dashboard loads
+    # straight into the right tier — no detection round-trip, no loading state.
+    viewport_bp =
+      with true <- connected?(socket),
+           %{"viewport_width" => w} when is_number(w) and w > 0 <- get_connect_params(socket) do
+        Breakpoints.for_width(w)
+      else
+        _ -> nil
+      end
+
     # Safety net: reveal the grid at the default tier if the DashboardBreakpoint
     # hook never reports (JS present but the hook/asset failed) — a stuck-invisible
     # dashboard is worse than the default tier. This must NOT race a slow-but-
@@ -71,7 +83,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     # flashes the desktop tier before the detected one snaps in. A no-JS browser
     # is revealed instantly by the <noscript> style, so this timer only serves
     # the broken-asset case — it can afford to be generous.
-    if connected?(socket), do: Process.send_after(self(), :reveal_grid_fallback, 4000)
+    if connected?(socket) and is_nil(viewport_bp),
+      do: Process.send_after(self(), :reveal_grid_fallback, 4000)
 
     {:ok,
      socket
@@ -84,6 +97,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
      # wrong-tier flash. `bp_manual?` locks it once the user picks a tab.
      |> assign(:active_bp, Breakpoints.default())
      |> assign(:detected?, false)
+     # The screen tier from the connect params (nil = wait for the hook), and
+     # whether the REAL screen is known — a fallback-timer reveal sets detected?
+     # without knowledge, and a late hook report must still correct it.
+     |> assign(:viewport_bp, viewport_bp)
+     |> assign(:screen_known?, false)
      |> assign(:bp_manual?, false)
      # The viewer's own screen tier (from the detect hook), so we can tell when the
      # active view is a different size (shown scaled) vs the viewer's own size.
@@ -110,6 +128,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
            socket
            |> assign(:dashboard, dashboard)
            |> assign(:page_title, dashboard.title)
+           |> maybe_apply_viewport_bp()
            |> maybe_schedule_refresh()}
         else
           {:noreply,
@@ -241,6 +260,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   @impl true
   def handle_event("detect_bp", %{"bp" => screen_bp}, socket) do
     cond do
+      # The connect params already told us (or a prior report did) — the hook's
+      # round-trip is just the fallback path arriving late.
+      socket.assigns.screen_known? ->
+        {:noreply, socket}
+
       not Breakpoints.valid?(screen_bp) ->
         {:noreply, assign(socket, :detected?, true)}
 
@@ -254,23 +278,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
          |> assign(:dashboard, dashboard)
          |> assign(:screen_bp, screen_bp)
          |> assign(:scaled?, socket.assigns.active_bp != screen_bp)
-         |> assign(:detected?, true)}
+         |> assign(:detected?, true)
+         |> assign(:screen_known?, true)}
 
       true ->
-        {:ok, dashboard} = Dashboards.put_home_bp(socket.assigns.dashboard, screen_bp)
-        active_bp = Dashboards.display_bp(dashboard, screen_bp)
-        scaled? = active_bp != screen_bp
-
-        {:noreply,
-         socket
-         |> assign(:dashboard, dashboard)
-         |> assign(:screen_bp, screen_bp)
-         |> assign(:active_bp, active_bp)
-         |> assign(:scaled?, scaled?)
-         # On a small screen the catalog floats over the grid, so start it closed
-         # (the "Widgets" button opens it to add) — otherwise it blocks the grid.
-         |> assign(:show_catalog, not scaled?)
-         |> assign(:detected?, true)}
+        {:noreply, apply_screen_bp(socket, screen_bp)}
     end
   end
 
@@ -539,6 +551,35 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   defp maybe_put_min_override(attrs, val),
     do: Map.put(attrs, :min_override, val in [true, "true"])
+
+  # Connect params told us the screen at mount — apply it once the dashboard is
+  # loaded, and only once (a live patch must not reset a manual tab pick).
+  defp maybe_apply_viewport_bp(socket) do
+    if socket.assigns.viewport_bp && not socket.assigns.detected?,
+      do: apply_screen_bp(socket, socket.assigns.viewport_bp),
+      else: socket
+  end
+
+  # The user's real screen tier is known (connect params or the detect hook):
+  # show a DESIGNED view — this tier if designed, else the nearest one scaled to
+  # fit — never a freshly-derived layout. Records the home tier on a brand-new
+  # dashboard.
+  defp apply_screen_bp(socket, screen_bp) do
+    {:ok, dashboard} = Dashboards.put_home_bp(socket.assigns.dashboard, screen_bp)
+    active_bp = Dashboards.display_bp(dashboard, screen_bp)
+    scaled? = active_bp != screen_bp
+
+    socket
+    |> assign(:dashboard, dashboard)
+    |> assign(:screen_bp, screen_bp)
+    |> assign(:active_bp, active_bp)
+    |> assign(:scaled?, scaled?)
+    # On a small screen the catalog floats over the grid, so start it closed
+    # (the "Widgets" button opens it to add) — otherwise it blocks the grid.
+    |> assign(:show_catalog, not scaled?)
+    |> assign(:detected?, true)
+    |> assign(:screen_known?, true)
+  end
 
   # Assign the updated dashboard on a successful layout write; a rare `{:error, _}`
   # (transient DB failure) is a no-op rather than a `MatchError` crash.

@@ -91,7 +91,12 @@ the fit scale), and the preview only ever moves through FREE cells (occupancy fr
 the other cards' data attrs), so the shown spot is always legal and **the drop
 always matches the preview**. On drop it pushes `move_widget_grid %{id, x, y}`
 (0-based cells; `Dashboards.place_widget_grid/5` clamps + collision-rejects
-server-side). **Catalog drag-out** (`DashboardCatalogDrag` on `#dashboard-catalog`,
+server-side). Tier detection: hosts SHOULD pass `viewport_width` in the
+LiveSocket connect params (README) so the builder mounts straight into the
+right tier (`Breakpoints.for_width/1`, `screen_known?`); without it the
+`DashboardBreakpoint` hook round-trip detects it behind a loading state, with
+a 4s reveal-at-default fallback for broken assets (no-JS reveals instantly via
+`<noscript>`). **Catalog drag-out** (`DashboardCatalogDrag` on `#dashboard-catalog`,
 entries carry `data-widget-key/-w/-h`): drag an entry past a ~6px threshold and a
 ghost + a free-cells-only dashed footprint follow the pointer; dropping pushes
 `add_widget_at %{key, x, y}` (grid) or `add_widget_px %{key, fx, fy}` (pixel

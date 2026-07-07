@@ -10,6 +10,25 @@ in order, wrapping to a single column on small screens. The grid is
 is progressive enhancement via core's `SortableGrid` hook. Layouts persist per
 user (personal dashboards) and per system/role (shared dashboards).
 
+## Instant tier detection (recommended)
+
+The grid builder picks the responsive tier (TV/Desktop/iPad/Phone) that best
+fits the viewer's screen. By default that needs a client hook round-trip after
+connect, so the dashboard briefly shows a loading state. Pass the viewport in
+your LiveSocket connect params and the tier is resolved server-side at mount —
+the dashboard loads straight into the right layout:
+
+```js
+// assets/js/app.js — a closure so reconnects re-read the width
+const liveSocket = new LiveSocket("/live", Socket, {
+  params: () => ({_csrf_token: csrfToken, viewport_width: window.innerWidth}),
+  hooks: {...window.PhoenixKitHooks},
+})
+```
+
+Hosts that don't pass `viewport_width` keep working — detection falls back to
+the hook round-trip.
+
 ## Installation
 
 Add to your PhoenixKit host app's `mix.exs`:

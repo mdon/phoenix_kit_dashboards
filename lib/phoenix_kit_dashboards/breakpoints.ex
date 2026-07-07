@@ -46,6 +46,17 @@ defmodule PhoenixKitDashboards.Breakpoints do
   @spec get(String.t()) :: t() | nil
   def get(key), do: Enum.find(@breakpoints, &(&1.key == key))
 
+  @doc """
+  The tier that best fits a viewport `width` in CSS px — the largest whose
+  `min_width` it clears (phone is the catch-all). The server-side twin of the
+  DashboardBreakpoint hook's matching, for hosts that pass the viewport in the
+  LiveSocket connect params.
+  """
+  @spec for_width(number()) :: String.t()
+  def for_width(width) when is_number(width) do
+    Enum.find(@breakpoints, List.last(@breakpoints), &(width >= &1.min_width)).key
+  end
+
   @doc "The column count for a breakpoint key (12 if unknown)."
   @spec cols(String.t()) :: pos_integer()
   def cols(key) do

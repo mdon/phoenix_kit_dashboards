@@ -149,6 +149,44 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       refute html =~ ~r/pk-grid-ready[^"]*\bhidden\b/
     end
 
+    test "viewport_width connect params load straight into the right tier — no loading state",
+         %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      # Designed at TV (home recorded before the first widget seeds it).
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, dashboard} = Dashboards.put_home_bp(dashboard, "tv")
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
+
+      conn = put_connect_params(conn, %{"viewport_width" => 2200})
+      {:ok, view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+
+      # First live render: already revealed at the TV tier (2200px), no spinner
+      # phase — the tier was resolved server-side at mount.
+      refute html =~ ~r/pk-grid-ready[^"]*\bhidden\b/
+      assert html =~ ~s(data-cols="16")
+      refute html =~ "scaled to fit"
+
+      # A late hook report is the fallback path arriving twice — ignored.
+      html = render_hook(view, "detect_bp", %{"bp" => "phone"})
+      assert html =~ ~s(data-cols="16")
+      refute html =~ "scaled to fit"
+    end
+
+    test "a phone-width viewport shows the nearest designed view scaled, catalog closed",
+         %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
+
+      conn = put_connect_params(conn, %{"viewport_width" => 390})
+      {:ok, _view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+
+      # Phone isn't designed → nearest designed (desktop home) scaled to fit,
+      # with the catalog starting closed so it doesn't cover the grid.
+      assert html =~ "scaled to fit"
+      refute html =~ "Widget catalog"
+    end
+
     test "a size you didn't design shows the nearest designed view scaled — but editable", %{
       conn: conn
     } do
