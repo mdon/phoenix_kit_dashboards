@@ -57,7 +57,14 @@ defmodule PhoenixKitDashboards.Widgets do
             options: ClockWidget.timezone_options(),
             default: "UTC"
           },
-          %{key: "show_timezone", type: :boolean, label: "Show timezone", default: true}
+          %{key: "show_timezone", type: :boolean, label: "Show timezone", default: true},
+          %{
+            key: "format",
+            type: :select,
+            label: "Time format",
+            options: ["24h", "12h"],
+            default: "24h"
+          }
         ]
       },
       %{

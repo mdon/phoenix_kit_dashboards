@@ -79,6 +79,7 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
   def update(assigns, socket) do
     settings = assigns[:settings] || %{}
     {now, zone} = resolve_time(Map.get(settings, "timezone", "UTC"))
+    {digits, suffix} = format_time(now, Map.get(settings, "format", "24h"))
 
     {:ok,
      socket
@@ -87,14 +88,34 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
      |> assign(:show_tz, Map.get(settings, "show_timezone", true) in [true, "true"])
      |> assign(:view, assigns[:view] || "normal")
      |> assign(:zone, zone)
-     |> assign(:now, now)}
+     |> assign(:now, now)
+     |> assign(:digits, digits)
+     |> assign(:suffix, suffix)
+     # A single-row instance gets the compact treatment: smaller digits, no
+     # date line, tighter padding — the clock must always FIT its box (the root
+     # clips as the last resort; a clock with a scrollbar is broken).
+     |> assign(:compact, compact?(assigns[:size]))}
   end
+
+  # The time as {digits, suffix}: 24h has no suffix; 12h renders "hh:mm:ss"
+  # with a small AM/PM suffix (the analog face ignores the format — a dial is
+  # 12-hour by nature).
+  defp format_time(now, "12h"),
+    do: {Calendar.strftime(now, "%I:%M:%S"), Calendar.strftime(now, "%p")}
+
+  defp format_time(now, _), do: {Calendar.strftime(now, "%H:%M:%S"), nil}
+
+  defp compact?(%{h: h}) when is_integer(h), do: h < 2
+  defp compact?(_), do: false
 
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="card bg-base-100 h-full">
-      <div class="card-body flex h-full min-h-0 flex-col items-center justify-center gap-1 p-3 text-center">
+    <div class="card bg-base-100 h-full overflow-hidden">
+      <div class={[
+        "card-body flex h-full min-h-0 flex-col items-center justify-center text-center",
+        if(@compact, do: "gap-0.5 p-2", else: "gap-1 p-3")
+      ]}>
         <span :if={@label != ""} class="text-xs uppercase tracking-wide text-base-content/50">
           {@label}
         </span>
@@ -103,14 +124,21 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
 
         <span
           :if={@view == "digital"}
-          class="rounded-lg bg-base-200 px-4 py-2 font-mono text-4xl font-semibold tabular-nums tracking-wider"
+          class={[
+            "rounded-lg bg-base-200 font-mono font-semibold tabular-nums tracking-wider",
+            if(@compact, do: "px-3 py-0.5 text-2xl", else: "px-4 py-2 text-4xl")
+          ]}
         >
-          {Calendar.strftime(@now, "%H:%M:%S")}
+          {@digits}<span :if={@suffix} class="ml-1 align-baseline text-sm font-normal">{@suffix}</span>
         </span>
 
         <%= if @view not in ["analog", "digital"] do %>
-          <span class="font-mono text-2xl tabular-nums">{Calendar.strftime(@now, "%H:%M:%S")}</span>
-          <span class="text-xs text-base-content/50">{Calendar.strftime(@now, "%Y-%m-%d")}</span>
+          <span class="font-mono text-2xl tabular-nums">
+            {@digits}<span :if={@suffix} class="ml-1 text-sm font-normal text-base-content/60">{@suffix}</span>
+          </span>
+          <span :if={not @compact} class="text-xs text-base-content/50">
+            {Calendar.strftime(@now, "%Y-%m-%d")}
+          </span>
         <% end %>
 
         <span :if={@show_tz} class="text-xs text-base-content/50">{@zone}</span>

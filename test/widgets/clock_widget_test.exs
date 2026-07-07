@@ -84,6 +84,36 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidgetTest do
       refute analog =~ ~r/>\d{2}:\d{2}:\d{2}</
     end
 
+    test "12h format shows a 01-12 hour with an AM/PM suffix; 24h has none" do
+      h24 = render_clock(settings: %{"format" => "24h"})
+      refute h24 =~ ~r/>\s*(AM|PM)\s*</
+
+      h12 = render_clock(settings: %{"format" => "12h"})
+      assert h12 =~ ~r/>\s*(AM|PM)\s*</
+      [_, hour] = Regex.run(~r/(\d{2}):\d{2}:\d{2}/, h12)
+      assert String.to_integer(hour) in 1..12
+
+      # The analog face ignores the format (a dial is 12-hour by nature).
+      analog = render_clock(view: "analog", settings: %{"format" => "12h"})
+      refute analog =~ ~r/>\s*(AM|PM)\s*</
+    end
+
+    test "a single-row instance compacts instead of overflowing (no scrollbars in a clock)" do
+      compact = render_clock(view: "digital", size: %{w: 3, h: 1}, settings: %{"label" => "NYC"})
+      # Smaller digits + tighter padding + no date line; the root clips as a
+      # last resort. The label stays — it's the point of a world-clock row.
+      assert compact =~ "text-2xl"
+      refute compact =~ "text-4xl"
+      assert compact =~ "overflow-hidden"
+      assert compact =~ "NYC"
+
+      roomy = render_clock(view: "digital", size: %{w: 3, h: 2})
+      assert roomy =~ "text-4xl"
+
+      normal_compact = render_clock(size: %{w: 2, h: 1})
+      refute normal_compact =~ ~r/\d{4}-\d{2}-\d{2}/
+    end
+
     test "a per-clock offset changes the displayed hour" do
       utc = DateTime.utc_now()
       html = render_clock(settings: %{"timezone" => "UTC+3", "show_timezone" => "true"})
