@@ -904,7 +904,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
               id="dashboard-grid"
               phx-hook="DashboardGridDrag"
               data-cols={@cols}
-              data-max-rows={PhoenixKitDashboards.Grid.max_rows()}
+              data-max-rows={Breakpoints.max_rows(@active_bp)}
               class="relative grid auto-rows-[8rem] content-start gap-3"
               style={"grid-template-columns: repeat(#{@cols}, minmax(0, 1fr));"}
             >
@@ -1378,7 +1378,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         grid_x: (grid["x"] || 0) + 1,
         grid_y: (grid["y"] || 0) + 1,
         cols: Breakpoints.cols(assigns.active_bp),
-        max_rows: PhoenixKitDashboards.Grid.max_rows()
+        max_rows: Breakpoints.max_rows(assigns.active_bp)
       )
 
     ~H"""

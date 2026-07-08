@@ -14,10 +14,22 @@ defmodule PhoenixKitDashboards.Breakpoints do
   # `preview_width` is the width the builder previews the tier at (a device frame),
   # so a phone layout is edited at phone width rather than stretched to the monitor.
   @breakpoints [
-    %{key: "tv", label: "TV", min_width: 1920, cols: 16, preview_width: 1600},
-    %{key: "desktop", label: "Desktop", min_width: 1280, cols: 12, preview_width: 1200},
-    %{key: "ipad", label: "iPad", min_width: 768, cols: 8, preview_width: 820},
-    %{key: "phone", label: "Phone", min_width: 0, cols: 4, preview_width: 390}
+    # max_rows = the tier's designable surface (fully rendered + scrollable in
+    # the builder): a TV never scrolls, so it gets barely more than one screen;
+    # a phone feed runs long. Derived tiers may still overflow it (packing
+    # denser content into fewer columns) — that renders fine, the cap only
+    # bounds MANUAL placement and the scroll surface.
+    %{key: "tv", label: "TV", min_width: 1920, cols: 16, preview_width: 1600, max_rows: 8},
+    %{
+      key: "desktop",
+      label: "Desktop",
+      min_width: 1280,
+      cols: 12,
+      preview_width: 1200,
+      max_rows: 15
+    },
+    %{key: "ipad", label: "iPad", min_width: 768, cols: 8, preview_width: 820, max_rows: 24},
+    %{key: "phone", label: "Phone", min_width: 0, cols: 4, preview_width: 390, max_rows: 36}
   ]
 
   @default_key "desktop"
@@ -27,7 +39,8 @@ defmodule PhoenixKitDashboards.Breakpoints do
           label: String.t(),
           min_width: non_neg_integer(),
           cols: pos_integer(),
-          preview_width: pos_integer()
+          preview_width: pos_integer(),
+          max_rows: pos_integer()
         }
 
   @doc "All breakpoint tiers, ordered largest → smallest."
@@ -55,6 +68,15 @@ defmodule PhoenixKitDashboards.Breakpoints do
   @spec for_width(number()) :: String.t()
   def for_width(width) when is_number(width) do
     Enum.find(@breakpoints, List.last(@breakpoints), &(width >= &1.min_width)).key
+  end
+
+  @doc "The tier's designable rows (the builder renders + scrolls all of them)."
+  @spec max_rows(String.t()) :: pos_integer()
+  def max_rows(key) do
+    case get(key) do
+      %{max_rows: rows} -> rows
+      _ -> 15
+    end
   end
 
   @doc "The column count for a breakpoint key (12 if unknown)."

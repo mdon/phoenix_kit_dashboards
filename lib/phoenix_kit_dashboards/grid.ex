@@ -20,11 +20,12 @@ defmodule PhoenixKitDashboards.Grid do
   (`%{"x" => _, "y" => _, "w" => _, "h" => _}`) — no DOM, no DB.
   """
 
-  # The full designable surface: the builder renders (and scrolls) ALL of it,
-  # so a widget can be placed on any row up front — not just near the existing
-  # content. Also bounds placement scans and hostile coordinates. 50 rows
-  # (~7000px at the default row height) keeps the scrollbar meaningful; the
-  # old 400 was a runaway bound, unusable as a real surface.
+  # The HARD row bound: placement scans and derived-tier packing never go past
+  # it, and hostile coordinates clamp to it. The per-TIER designable surface
+  # (what the builder renders and lets you place on manually) is smaller —
+  # `Breakpoints.max_rows/1` (TV 8 … phone 36); derived packing may overflow a
+  # tier's surface into this headroom when denser content reflows into fewer
+  # columns.
   @max_rows 50
 
   @doc "The maximum row index + span extent a placement may reach."

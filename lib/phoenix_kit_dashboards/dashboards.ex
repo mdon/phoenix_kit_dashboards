@@ -269,7 +269,7 @@ defmodule PhoenixKitDashboards.Dashboards do
         w = min(widget.default_size.w, cols)
         h = widget.default_size.h
         x = clamp(x, 0, max(cols - w, 0))
-        y = clamp(y, 0, max(Grid.max_rows() - h, 0))
+        y = clamp(y, 0, max(Breakpoints.max_rows(bp) - h, 0))
         others = Enum.map(dashboard.layout, &Layout.placement(&1, bp))
 
         if Grid.collides?(x, y, w, h, others) do
@@ -433,7 +433,7 @@ defmodule PhoenixKitDashboards.Dashboards do
     w = min(placement["w"], cols)
     h = placement["h"]
     x = clamp(x, 0, max(cols - w, 0))
-    y = clamp(y, 0, max(Grid.max_rows() - h, 0))
+    y = clamp(y, 0, max(Breakpoints.max_rows(bp) - h, 0))
 
     others =
       dashboard.layout
@@ -825,7 +825,7 @@ defmodule PhoenixKitDashboards.Dashboards do
           |> Enum.reject(&(&1["id"] == item["id"]))
           |> Enum.map(&Layout.placement(&1, bp))
 
-        if p["x"] + w <= cols and p["y"] + h <= Grid.max_rows() and
+        if p["x"] + w <= cols and p["y"] + h <= Breakpoints.max_rows(bp) and
              not Grid.collides?(p["x"], p["y"], w, h, others) do
           Layout.put_placement(item, bp, %{"w" => w, "h" => h})
         else
