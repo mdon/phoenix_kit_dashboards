@@ -897,10 +897,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
     ~H"""
     <div class="relative flex min-h-0 flex-1 flex-col">
+      <%!-- No padding and no canvas frame: the canvas fills the pane edge-to-edge
+      (DashboardFreeFit also grows its height to at least the pane's), so there
+      is no visible gap around it. --%>
       <div
         id="dashboard-free-fit"
         phx-hook="DashboardFreeFit"
-        class="flex-1 overflow-auto bg-base-200 p-4"
+        class="relative flex-1 overflow-auto bg-base-200"
         style="scrollbar-gutter: stable;"
       >
       <%!-- The spacer carries the scaled dimensions so the area scrolls; the
@@ -908,13 +911,21 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       It starts hidden so the pre-fit (unscaled) frame never flashes on load; the
       hook reveals it once scaled, and the <noscript> keeps it visible without JS. --%>
       {Phoenix.HTML.raw(
-        ~s(<noscript><style>.pk-free-canvas{opacity:1 !important}</style></noscript>)
+        ~s(<noscript><style>.pk-free-canvas{opacity:1 !important}.pk-free-loading{display:none !important}</style></noscript>)
       )}
+      <%!-- Covers the pane until DashboardFreeFit scales + reveals the canvas —
+      without it, a slow load shows a blank pane with nothing happening. --%>
+      <div class="pk-free-loading absolute inset-0 flex flex-col items-center justify-center gap-3 text-base-content/50">
+        <span class="loading loading-spinner loading-lg"></span>
+        <p class="text-sm">
+          {Gettext.gettext(PhoenixKitWeb.Gettext, "Fitting the dashboard to your screen…")}
+        </p>
+      </div>
       <div class="pk-free-spacer relative" style={"width: #{@cw}px; height: #{@ch}px;"}>
         <div
           id="dashboard-free-grid"
           phx-hook="DashboardFreeDrag"
-          class="pk-free-canvas absolute left-0 top-0 rounded border border-dashed border-base-300 bg-base-100/20"
+          class="pk-free-canvas absolute left-0 top-0"
           style={"width: #{@cw}px; height: #{@ch}px; transform-origin: top left; opacity: 0;"}
           data-logical-width={@cw}
           data-logical-height={@ch}

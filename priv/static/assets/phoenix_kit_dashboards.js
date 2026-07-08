@@ -1113,14 +1113,27 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       canvas.style.width = designW + "px";
 
       var scale = avail / designW;
+
+      // …and at least as TALL as the container, so the canvas fills the pane
+      // edge-to-edge (no visible gap below short content); taller content
+      // scrolls as before.
+      var padY =
+        (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      var availH = this.el.clientHeight - padY;
+      var designH = Math.max(logicalH, availH / scale);
+      canvas.style.height = designH + "px";
+
       canvas.style.transformOrigin = "top left";
       canvas.style.transform = "scale(" + scale + ")";
       // The scaled canvas is position:absolute (out of flow); the spacer carries
       // the scaled dimensions so the container scrolls to fit it.
       spacer.style.width = designW * scale + "px";
-      spacer.style.height = logicalH * scale + "px";
-      // Reveal only once scaled, so the pre-fit (unscaled) frame never flashes.
+      spacer.style.height = designH * scale + "px";
+      // Reveal only once scaled, so the pre-fit (unscaled) frame never flashes;
+      // the loading spinner covered the pane until this moment.
       canvas.style.opacity = "1";
+      var loading = this.el.querySelector(".pk-free-loading");
+      if (loading) loading.style.display = "none";
     },
   };
 
