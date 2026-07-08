@@ -648,17 +648,33 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           <h1 class="text-lg font-semibold">{@dashboard.title}</h1>
           <span class="badge badge-ghost badge-sm">{@dashboard.scope}</span>
         </div>
-        <%!-- Client-side toggle (JS.toggle, no server round-trip) — the panel is
-        always rendered, hidden by default, so opening it is instant. --%>
-        <button
-          id="dashboard-catalog-toggle"
-          type="button"
-          phx-click={JS.toggle(to: "#dashboard-catalog")}
-          class="btn btn-primary btn-sm"
-        >
-          <.icon name="hero-squares-plus" class="w-4 h-4" />
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "Widgets")}
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            id="dashboard-fullscreen-btn"
+            phx-hook="DashboardFullscreen"
+            data-target={
+              if Dashboard.layout_mode(@dashboard) == "free",
+                do: "dashboard-free-fit",
+                else: "dashboard-grid-fit"
+            }
+            type="button"
+            class="btn btn-ghost btn-sm btn-square"
+            title={Gettext.gettext(PhoenixKitWeb.Gettext, "Full screen")}
+          >
+            <.icon name="hero-arrows-pointing-out" class="w-4 h-4" />
+          </button>
+          <%!-- Client-side toggle (JS.toggle, no server round-trip) — the panel is
+          always rendered, hidden by default, so opening it is instant. --%>
+          <button
+            id="dashboard-catalog-toggle"
+            type="button"
+            phx-click={JS.toggle(to: "#dashboard-catalog")}
+            class="btn btn-primary btn-sm"
+          >
+            <.icon name="hero-squares-plus" class="w-4 h-4" />
+            {Gettext.gettext(PhoenixKitWeb.Gettext, "Widgets")}
+          </button>
+        </div>
       </div>
 
       <div class="relative flex flex-1 min-h-0">
@@ -789,18 +805,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         {Gettext.gettext(PhoenixKitWeb.Gettext, "Reset")}
       </button>
 
-      <div class="ml-auto flex items-center gap-1">
-        <button
-          id="dashboard-fullscreen-btn"
-          phx-hook="DashboardFullscreen"
-          data-target="dashboard-grid-fit"
-          type="button"
-          class="btn btn-ghost btn-xs btn-square"
-          title={Gettext.gettext(PhoenixKitWeb.Gettext, "Full screen")}
-        >
-          <.icon name="hero-arrows-pointing-out" class="w-3.5 h-3.5" />
-        </button>
-      </div>
     </div>
     """
   end
@@ -893,16 +897,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
     ~H"""
     <div class="relative flex min-h-0 flex-1 flex-col">
-      <button
-        id="dashboard-fullscreen-btn"
-        phx-hook="DashboardFullscreen"
-        data-target="dashboard-free-fit"
-        type="button"
-        class="btn btn-ghost btn-xs btn-square absolute right-6 top-6 z-10 bg-base-100/80"
-        title={Gettext.gettext(PhoenixKitWeb.Gettext, "Full screen")}
-      >
-        <.icon name="hero-arrows-pointing-out" class="w-3.5 h-3.5" />
-      </button>
       <div
         id="dashboard-free-fit"
         phx-hook="DashboardFreeFit"
