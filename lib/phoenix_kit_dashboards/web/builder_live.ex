@@ -12,7 +12,9 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   every mutation re-renders normally (no `phx-update="ignore"`), so
   adding/removing/moving/resizing a widget is live.
 
-  There are two layout modes (per-dashboard `config["mode"]`):
+  There are two render modes, derived from the dashboard's **type** (fixed at
+  creation — `config["type"]` = `"grid"` | `"pixel"`) via `Dashboard.layout_mode/1`
+  (legacy `config["mode"]` still maps):
 
   - **grid** — explicit cell placement on a responsive column grid: each widget
     is anchored at `x`/`y` cells and spans `w`×`h` — place it ANYWHERE (gaps are

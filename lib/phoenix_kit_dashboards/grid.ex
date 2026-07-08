@@ -13,7 +13,7 @@ defmodule PhoenixKitDashboards.Grid do
     * `first_free/4` — the first free rectangle in reading order (row-major).
     * `compact/2` — pack a list of spans into explicit cells in list order
       (legacy/derived layouts: "reflow + compact").
-    * `fit_size/7` — clamp a requested resize so it grows until blocked by a
+    * `fit_size/8` — clamp a requested resize so it grows until blocked by a
       neighbour or the grid edge, never onto another widget.
 
   Everything is integer cell math on plain string-keyed placement maps
