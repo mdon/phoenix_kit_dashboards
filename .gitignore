@@ -11,6 +11,10 @@ erl_crash.dump
 .elixir_ls/
 .expert/
 
+# Dialyzer PLT files
+*.plt
+priv/plts/
+
 # Hex package tarball
 phoenix_kit_dashboards-*.tar
 

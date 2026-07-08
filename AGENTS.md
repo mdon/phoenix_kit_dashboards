@@ -306,3 +306,9 @@ Branch `main`; PR `main → main`. Commit messages start with `Add`, `Update`,
 `Fix`, `Remove`, `Merge` — **no AI attribution footers**. There is no GitHub
 Actions CI on this repo: test state is whatever local `mix test` reports (run
 against local core via `PHOENIX_KIT_PATH`).
+
+PR review files go in `dev_docs/pull_requests/{year}/{pr_number}-{slug}/` — a
+`README.md` (PR summary) plus a per-reviewer `{AGENT}_REVIEW.md` (e.g.
+`CLAUDE_REVIEW.md`; never append to another agent's file). See
+`dev_docs/pull_requests/README.md` + `TEMPLATE.md`. Severity taxonomy:
+`BUG - CRITICAL/HIGH/MEDIUM`, `IMPROVEMENT - HIGH/MEDIUM`, `NITPICK`.
