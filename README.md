@@ -4,10 +4,14 @@ Customizable dashboards for [PhoenixKit](https://github.com/BeamLabEU/phoenix_ki
 
 Compose dashboard pages from **widgets** contributed by any PhoenixKit module.
 A widget is a self-contained `Phoenix.LiveComponent`; a dashboard is a
-responsive grid of widget instances — each spans `w` of 12 columns and `h` rows,
-in order, wrapping to a single column on small screens. The grid is
-**server-rendered** (Phoenix-first — it works without JavaScript); drag-to-reorder
-is progressive enhancement via core's `SortableGrid` hook. Layouts persist per
+responsive grid of widget instances — each anchored at an explicit cell
+(gaps allowed, no overlap) and spanning `w` columns × `h` rows per breakpoint
+tier (TV 16 / Desktop 12 / iPad 8 / Phone 4 columns), with undesigned tiers
+auto-derived by reflow + compact. A second dashboard type is a **pixel canvas**
+(exact-px placement, deliberate overlap via z-order). The grid is
+**server-rendered** (Phoenix-first — it renders and is operable without
+JavaScript via the settings modal); drag/resize/catalog-drag are progressive
+enhancement via the module's own hooks (`js_sources/0`). Layouts persist per
 user (personal dashboards) and per system/role (shared dashboards).
 
 ## Instant tier detection (recommended)

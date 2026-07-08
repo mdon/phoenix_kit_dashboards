@@ -700,7 +700,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   end
 
   # Mode-aware grid. "grid" is explicit cell placement (x/y anchor + w/h span,
-  # DashboardGridDrag); "free" is pixel placement (arrow-nudge move, zoom).
+  # DashboardGridDrag); "free" is exact-px placement (DashboardFreeDrag,
+  # z-order restack).
   attr(:dashboard, :map, required: true)
   attr(:scope, :any, required: true)
   attr(:active_bp, :string, required: true)

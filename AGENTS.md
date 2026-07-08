@@ -107,8 +107,9 @@ release it **branches on the card's `data-free` flag**: grid mode snaps to the
 nearest whole cell that FITS (grid edge + neighbours, mirroring `Grid.fit_size/8`)
 keeping the x/y anchor → `resize_widget_to %{id, w, h}`; free mode keeps the exact
 px → `resize_widget_to %{id, fw, fh}` (clamped to `[60, 4000]`). No-JS fallbacks:
-the Settings modal's Width/Height + Column/Row inputs (grid) and arrow nudges + px
-inputs (pixel).
+the Settings modal's Width/Height + Column/Row inputs (grid) and Width/Height +
+X/Y px inputs (pixel). All placement drags **edge auto-scroll** the pane (a shared
+rAF scroller; FreeDrag folds the pane-scroll delta into its drag deltas).
 
 The module hooks ship via `js_sources/0` (`priv/static/assets/phoenix_kit_dashboards.js`):
 `DashboardGridDrag` (above), `DashboardFreeDrag` (free canvas — drag a
@@ -116,8 +117,8 @@ The module hooks ship via `js_sources/0` (`priv/static/assets/phoenix_kit_dashbo
 `move_widget_to %{id, fx, fy}` in exact px), `DashboardResize` (corner resize, both
 modes; see above), plus the fit/fullscreen/tier helpers (`DashboardGridFit`,
 `DashboardFreeFit`, `DashboardFullscreen`, `DashboardBreakpoint`). All are
-enhancement only — the non-hook fallbacks are server-driven modal inputs / arrow
-nudges. The drag/resize hooks leave the card exactly where dropped and update the
+enhancement only — the non-hook fallbacks are the server-driven modal inputs.
+The drag/resize hooks leave the card exactly where dropped and update the
 style in the server's format, so the re-render confirms identically with **no
 rubber-band / no snap**; they guard concurrent pointers + handle `pointercancel`,
 and only the primary button starts a gesture. An earlier scaffold loaded gridstack
@@ -143,8 +144,12 @@ without stored `x`/`y` are packed at render and pinned on their first edit).
   Desktop ≥1280 = 12, iPad ≥768 = 8, Phone <768 = 4**, each with a `preview_width`.
   A placement is `%{x, y, w, h, hidden}` — `x`/`y` are 0-based cells; a widget goes
   ANYWHERE (gaps allowed, that's the point), widgets never overlap
-  (`PhoenixKitDashboards.Grid` owns the occupancy/packing/fit math; rows are capped
-  at `Grid.max_rows/0` = 400). Each breakpoint has its own layout: edits
+  (`PhoenixKitDashboards.Grid` owns the occupancy/packing/fit math). Each tier has
+  its own **designable surface** (`Breakpoints.max_rows/1`: TV 8, desktop 15,
+  iPad 24, phone 36 — the builder renders + scrolls ALL of it so a widget can be
+  placed on any row up front; `Grid.max_rows/0` = 50 is only the hard bound that
+  derived-tier packing may overflow into, and overflowing content still renders).
+  Each breakpoint has its own layout: edits
   (move/resize/hide) act on the **active** breakpoint and flip it to customized —
   `materialize_grid` first pins every widget's resolved cells so editing one can't
   shift the rest (and `save_customized` must FORCE the layout write: the struct was
@@ -164,33 +169,44 @@ without stored `x`/`y` are packed at render and pinned on their first edit).
   keep occupying their cells).
 
   **Always fit-scaled + editable.** The grid is laid out at its tier's design width
-  and scaled to the available space by **`DashboardGridFit`** (shrink-to-fit; **fills**
-  in fullscreen; `grid_zoom` — a per-viewer precision multiplier — on top). It's
+  and scaled to the available space by **`DashboardGridFit`** (shrink-to-fit for a
+  DIFFERENT tier's preview; **fills** — scaling past 1:1 — on the viewer's NATIVE
+  tier, `data-fill`, and in fullscreen). It's
   **editable at any scale**: corner-resize via the scale-aware `DashboardResize`;
   cell placement by dragging via the module's `DashboardGridDrag` (screen-space
   metrics, so it's transform-aware at any scale) or the Settings modal's
   Column/Row inputs. So an employee on a phone can fix the *TV* layout: tap
-  TV, and edit it shrunk-to-fit (zoom in for precision). **On open** (the
+  TV, and edit it shrunk-to-fit. **On open** (the
   **`DashboardBreakpoint`** hook reports the screen tier once, `detect_bp`) we only
   ever show a *designed* view (`display_bp/2` = the screen tier if designed, else the
-  nearest designed one) — never a freshly-derived one. `scaled?` (view ≠ the viewer's
-  own size) just drives a banner + defaults the catalog closed (it **overlays** the
-  grid when open on a small screen instead of squeezing it). The **full-screen** button
-  (`DashboardFullscreen` → requests fullscreen on the fit container; a
-  `fullscreenchange` re-fits to fill) casts the current view to a TV / phone-landscape.
-  The whole grid pane is held hidden (a spinner + "fitting…" text; `<noscript>` reveal)
-  until the tier resolves, so the switcher never animates desktop→tv.
-- **`"pixel"` — an absolute pixel canvas** (unchanged): drag/resize anywhere, exact
-  px in `pixel.fx/fy/fw/fh`, no snapping. The **`DashboardFreeFit`** hook scales the
-  canvas via `transform: scale` to **fill the container width** (fit-to-width, so the
-  layout shrinks on a phone) — re-fit by a `ResizeObserver` (`scrollbar-gutter: stable`
-  prevents a feedback loop); a `.pk-free-spacer` gives the vertical scroll extent; the
-  `zoom` control is a manual multiplier. `transform: scale` (not CSS `zoom`) so the
-  drag/resize hooks' `rect.width/offsetWidth` reads the exact scale. Move =
-  `DashboardFreeDrag` (`left/top`) or arrow nudge; resize = the corner grip in px.
+  nearest designed one) — never a freshly-derived one; hosts passing
+  `viewport_width` in the LiveSocket connect params (README) skip the hook
+  round-trip entirely and mount straight into the right tier. `scaled?` (view ≠
+  the viewer's own size) drives the banner. The **catalog** is a slide-over panel
+  in BOTH modes: always rendered but hidden, toggled client-side (`JS.toggle`, so
+  opening is instant), entries grouped by providing module, and it hides itself
+  while a catalog drag is off-panel so cells under it can take the drop
+  (releasing over the visible panel cancels). The **full-screen** button lives in
+  the title row for both modes (`DashboardFullscreen` → requests fullscreen on
+  the fit container; a `fullscreenchange` re-fits to fill). The whole grid pane
+  is held hidden (a spinner + "fitting…" text; `<noscript>` reveal) until the
+  tier resolves, so the switcher never animates desktop→tv.
+- **`"pixel"` — an absolute pixel canvas**: drag/resize anywhere, exact px in
+  `pixel.fx/fy/fw/fh`, no snapping. Widgets may **overlap deliberately** — each
+  widget bar has bring-to-front / send-to-back (`restack_widget_px/3`, a `"z"`
+  key in the pixel map that survives moves since `put_pixel` merges). No Layout
+  bar and no zoom control (pixel has no tiers; fit-to-width handles scale). The
+  **`DashboardFreeFit`** hook scales the canvas via `transform: scale` to **fill
+  the container width** AND grows its height to at least the pane's (edge-to-edge,
+  no gap around the canvas; a loading spinner covers the pane until the fit
+  reveals it) — re-fit by a `ResizeObserver` (`scrollbar-gutter: stable` prevents
+  a feedback loop); a `.pk-free-spacer` gives the scroll extent. `transform:
+  scale` (not CSS `zoom`) so the drag/resize hooks' `rect.width/offsetWidth`
+  reads the exact scale. Move = `DashboardFreeDrag` (`left/top`, pane-scroll
+  compensated); resize = the corner grip in px.
 
 Both types render + are operable without JS (grid: Settings modal size +
-Column/Row inputs; pixel: arrow nudges + modal px inputs).
+Column/Row inputs; pixel: modal size + X/Y px inputs).
 - **Widget views + size**: a widget type may declare `views: [%{key:, name:}]`
   render variants (detailed / compact / color grid…); the instance stores the
   selected `"view"`, and the host passes both `view` and `size` (`%{w:, h:}`) to
@@ -229,9 +245,10 @@ system / role scopes, JSONB `layout`, `owner_user_uuid` FK → `phoenix_kit_user
 `ON DELETE CASCADE`) ships as core migration **V133** (first released in core
 `1.7.145`). The `mix.exs` core pin floor is `~> 1.7.145` for that reason.
 
-The per-dashboard JSONB **`config`** column (layout mode + zoom) ships as core
+The per-dashboard JSONB **`config`** column (type + home tier + customized set) ships as core
 migration **V139** — **currently unreleased**. Until it lands in a core release,
-the layout-mode / zoom features require a core with V139: run the suite and the
+the config-dependent features (type, home tier, customized tiers) require a core
+with V139: run the suite and the
 `phoenix_kit_parent` dev app against **local core** (`PHOENIX_KIT_PATH=../phoenix_kit`),
 where `ensure_current` builds V139. Standalone `mix test` against the published
 core is red for the config-dependent tests until the V139 release + a pin-floor
