@@ -135,10 +135,10 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
   defp scope_attrs(_params, socket),
     do: %{scope: "personal", owner_user_uuid: actor_uuid(socket)}
 
-  # Role-scoped dashboards aren't exposed in the create modal for now — but the
-  # context, visibility rules, and list still support them, so re-enabling is a
-  # one-liner: return `roles != []`.
-  defp offer_role_scope?(_roles), do: false
+  # Role-scoped dashboards: a shared board for everyone holding a role — how an
+  # admin ships a ready-made dashboard to e.g. every developer (the "employee
+  # dashboard" persona). Offered whenever the host has roles to pick from.
+  defp offer_role_scope?(roles), do: roles != []
 
   # View: own personal · any shared/system · role dashboards for the user's roles.
   # Shared with the builder via the context so the two never disagree.
