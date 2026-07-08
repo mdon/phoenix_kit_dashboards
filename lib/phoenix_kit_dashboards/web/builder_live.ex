@@ -89,7 +89,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     {:ok,
      socket
      |> assign(:catalog, Registry.list_for_scope(socket.assigns[:phoenix_kit_current_scope]))
-     |> assign(:show_catalog, true)
+     |> assign(:show_catalog, false)
      |> assign(:settings_instance, nil)
      # Which breakpoint the grid builder is editing. On connect the
      # DashboardBreakpoint hook detects the tier that best fits the screen (once)
@@ -574,9 +574,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     |> assign(:screen_bp, screen_bp)
     |> assign(:active_bp, active_bp)
     |> assign(:scaled?, scaled?)
-    # On a small screen the catalog floats over the grid, so start it closed
-    # (the "Widgets" button opens it to add) — otherwise it blocks the grid.
-    |> assign(:show_catalog, not scaled?)
     |> assign(:detected?, true)
     |> assign(:screen_known?, true)
   end
@@ -687,9 +684,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           detected={@detected?}
           scaled={@scaled?}
         />
-        <%!-- When the grid is fit-scaled (a small screen), the catalog floats as an
-        overlay instead of squeezing the grid down to nothing. --%>
-        <.catalog_drawer :if={@show_catalog} catalog={@catalog} overlay={@scaled?} />
+        <.catalog_drawer :if={@show_catalog} catalog={@catalog} />
       </div>
 
       <.settings_modal
@@ -1260,48 +1255,91 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   end
 
   attr(:catalog, :list, required: true)
-  attr(:overlay, :boolean, default: false)
 
-  # Catalog entries CLICK to add at the first free spot, or DRAG OUT onto the
-  # grid/canvas to place directly (DashboardCatalogDrag — a drag starts after a
-  # small movement threshold, so plain clicks keep working).
+  # A slide-over panel floating above the grid (never squeezing it), closed by
+  # default — the "Widgets" button or the in-panel X toggles it. Entries are
+  # grouped by the module that PROVIDES the widget (Built-in first). They CLICK
+  # to add at the first free spot, or DRAG OUT onto the grid/canvas to place
+  # directly (DashboardCatalogDrag — a drag starts after a small movement
+  # threshold, so plain clicks keep working).
   defp catalog_drawer(assigns) do
+    assigns = assign(assigns, :sections, catalog_sections(assigns.catalog))
+
     ~H"""
     <div
       id="dashboard-catalog"
       phx-hook="DashboardCatalogDrag"
-      class={[
-        "w-72 shrink-0 border-l border-base-300 bg-base-100 overflow-auto",
-        # When the grid is fit-scaled (small screen), float over it instead of taking
-        # flex width and squeezing the grid.
-        @overlay && "absolute right-0 top-0 bottom-0 z-20 shadow-xl"
-      ]}
+      class="pk-catalog-panel absolute bottom-0 right-0 top-0 z-20 w-72 overflow-auto border-l border-base-300 bg-base-100 shadow-xl"
     >
-      <div class="p-3 border-b border-base-300 text-sm font-semibold">
-        {Gettext.gettext(PhoenixKitWeb.Gettext, "Widget catalog")}
-      </div>
-      <div class="p-2 flex flex-col gap-2">
+      <style>
+        @keyframes pk-catalog-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        .pk-catalog-panel { animation: pk-catalog-in 0.15s ease-out; }
+      </style>
+      <div class="flex items-center justify-between border-b border-base-300 p-3">
+        <span class="text-sm font-semibold">
+          {Gettext.gettext(PhoenixKitWeb.Gettext, "Widget catalog")}
+        </span>
         <button
-          :for={widget <- @catalog}
           type="button"
-          phx-click="add_widget"
-          phx-value-key={widget.key}
-          data-widget-key={widget.key}
-          data-w={widget.default_size.w}
-          data-h={widget.default_size.h}
-          title={Gettext.gettext(PhoenixKitWeb.Gettext, "Click to add, or drag onto the dashboard")}
-          class="text-left p-2 rounded hover:bg-base-200 flex gap-2 items-start cursor-grab"
+          phx-click="toggle_catalog"
+          class="btn btn-ghost btn-xs btn-square"
+          title={Gettext.gettext(PhoenixKitWeb.Gettext, "Close")}
         >
-          <.icon name={widget.icon} class="w-5 h-5 mt-0.5 text-base-content/60" />
-          <span>
-            <span class="block text-sm font-medium">{widget.name}</span>
-            <span class="block text-xs text-base-content/50">{widget.description}</span>
-          </span>
+          <.icon name="hero-x-mark" class="w-4 h-4" />
         </button>
+      </div>
+      <div :for={{label, widgets} <- @sections} class="p-2">
+        <div class="px-2 pb-1 pt-1 text-xs font-medium uppercase tracking-wide text-base-content/40">
+          {label}
+        </div>
+        <div class="flex flex-col gap-2">
+          <button
+            :for={widget <- widgets}
+            type="button"
+            phx-click="add_widget"
+            phx-value-key={widget.key}
+            data-widget-key={widget.key}
+            data-w={widget.default_size.w}
+            data-h={widget.default_size.h}
+            title={Gettext.gettext(PhoenixKitWeb.Gettext, "Click to add, or drag onto the dashboard")}
+            class="text-left p-2 rounded hover:bg-base-200 flex gap-2 items-start cursor-grab"
+          >
+            <.icon name={widget.icon} class="w-5 h-5 mt-0.5 text-base-content/60" />
+            <span>
+              <span class="block text-sm font-medium">{widget.name}</span>
+              <span class="block text-xs text-base-content/50">{widget.description}</span>
+            </span>
+          </button>
+        </div>
       </div>
     </div>
     """
   end
+
+  # Catalog entries grouped by providing module, Built-in (this module's own
+  # widgets) first, other providers alphabetically. Entries keep their registry
+  # order within a section.
+  defp catalog_sections(catalog) do
+    catalog
+    |> Enum.group_by(&provider_label/1)
+    |> Enum.sort_by(fn {label, _widgets} -> {label != builtin_label(), label} end)
+  end
+
+  defp provider_label(%Widget{source: PhoenixKitDashboards}), do: builtin_label()
+
+  defp provider_label(%Widget{source: source}) when is_atom(source) and not is_nil(source) do
+    # Providers implement PhoenixKit.Module, whose module_name/0 is the
+    # human-readable name ("Projects"); fall back to the module's last segment.
+    if function_exported?(source, :module_name, 0) do
+      source.module_name()
+    else
+      source |> Module.split() |> List.last()
+    end
+  end
+
+  defp provider_label(_widget), do: builtin_label()
+
+  defp builtin_label, do: Gettext.gettext(PhoenixKitWeb.Gettext, "Built-in")
 
   # Settings form generated from the widget type's settings_schema.
   attr(:instance, :map, required: true)

@@ -762,6 +762,11 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         }
       }
 
+      // The panel overlays the grid's right edge — hide it while the drag is
+      // live so every cell (including those under the panel) is a drop target;
+      // finish()/cleanup() restores it.
+      this.el.style.visibility = "hidden";
+
       // Floating ghost: a copy of the catalog row following the cursor.
       var r = this.entry.getBoundingClientRect();
       var ghost = this.entry.cloneNode(true);
@@ -891,6 +896,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     },
 
     cleanup() {
+      this.el.style.visibility = "";
       if (this.ghost) {
         this.ghost.remove();
         this.ghost = null;

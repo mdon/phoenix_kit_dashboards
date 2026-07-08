@@ -25,16 +25,24 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       {conn, user} = sign_in(conn)
       dashboard = fixture_dashboard(user.uuid, %{title: "Ops Board"})
 
-      {:ok, _view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      {:ok, view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
 
       assert html =~ "Ops Board"
       # The daisyUI modal-open gutter counter must render (without it, opening a
       # modal reserves a phantom right-edge scrollbar strip the backdrop can't cover).
       assert html =~ "scrollbar-gutter:auto"
-      # Built-in widget catalog is present.
+
+      # The catalog is a slide-over panel, CLOSED by default; the Widgets button
+      # opens it, revealing the built-ins grouped under a provider section.
+      refute html =~ "Widget catalog"
+      html = view |> element("button[phx-click='toggle_catalog']") |> render_click()
+      assert html =~ "Widget catalog"
+      assert html =~ "Built-in"
       assert html =~ "Clock"
       assert html =~ "Note"
       assert html =~ "Module stats"
+      # It overlays the grid rather than squeezing it (absolute positioning).
+      assert html =~ ~r/id="dashboard-catalog"[^>]*class="[^"]*absolute/
     end
 
     test "redirects to the index with a flash when the dashboard is missing", %{conn: conn} do
@@ -109,7 +117,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       {conn, user} = sign_in(conn)
       dashboard = fixture_dashboard(user.uuid)
 
-      {:ok, _view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      html = view |> element("button[phx-click='toggle_catalog']") |> render_click()
 
       assert html =~ ~s(phx-hook="DashboardCatalogDrag")
       assert html =~ ~s(data-widget-key="core.note")
