@@ -721,6 +721,25 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       ev.preventDefault();
       this.ghost.style.left = ev.clientX + 10 + "px";
       this.ghost.style.top = ev.clientY + 10 + "px";
+
+      // The panel overlays the grid's right edge, so once the drag LEAVES the
+      // panel it closes (stays closed for the rest of the drag) — every cell,
+      // including those under it, becomes a drop target. cleanup() restores it
+      // after the drop, so the catalog is right back for the next widget.
+      if (!this.panelHidden) {
+        var pr = this.el.getBoundingClientRect();
+
+        if (
+          ev.clientX < pr.left ||
+          ev.clientX > pr.right ||
+          ev.clientY < pr.top ||
+          ev.clientY > pr.bottom
+        ) {
+          this.panelHidden = true;
+          this.el.style.visibility = "hidden";
+        }
+      }
+
       this.track(ev);
     },
 
@@ -762,10 +781,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         }
       }
 
-      // The panel overlays the grid's right edge — hide it while the drag is
-      // live so every cell (including those under the panel) is a drop target;
-      // finish()/cleanup() restores it.
-      this.el.style.visibility = "hidden";
+      this.panelHidden = false;
 
       // Floating ghost: a copy of the catalog row following the cursor.
       var r = this.entry.getBoundingClientRect();
