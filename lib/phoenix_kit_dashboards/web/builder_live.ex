@@ -46,6 +46,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   import PhoenixKitDashboards.Web.Helpers,
     only: [actor_uuid: 1, actor_opts: 1, user_role_uuids: 1]
 
+  alias Phoenix.LiveView.JS
   alias PhoenixKitDashboards.Breakpoints
   alias PhoenixKitDashboards.Dashboards
   alias PhoenixKitDashboards.Layout
@@ -89,7 +90,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     {:ok,
      socket
      |> assign(:catalog, Registry.list_for_scope(socket.assigns[:phoenix_kit_current_scope]))
-     |> assign(:show_catalog, false)
      |> assign(:settings_instance, nil)
      # Which breakpoint the grid builder is editing. On connect the
      # DashboardBreakpoint hook detects the tier that best fits the screen (once)
@@ -140,11 +140,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
            |> push_navigate(to: Paths.index())}
         end
     end
-  end
-
-  @impl true
-  def handle_event("toggle_catalog", _params, socket) do
-    {:noreply, update(socket, :show_catalog, &(!&1))}
   end
 
   @impl true
@@ -670,7 +665,14 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           <h1 class="text-lg font-semibold">{@dashboard.title}</h1>
           <span class="badge badge-ghost badge-sm">{@dashboard.scope}</span>
         </div>
-        <button type="button" phx-click="toggle_catalog" class="btn btn-primary btn-sm">
+        <%!-- Client-side toggle (JS.toggle, no server round-trip) — the panel is
+        always rendered, hidden by default, so opening it is instant. --%>
+        <button
+          id="dashboard-catalog-toggle"
+          type="button"
+          phx-click={JS.toggle(to: "#dashboard-catalog")}
+          class="btn btn-primary btn-sm"
+        >
           <.icon name="hero-squares-plus" class="w-4 h-4" />
           {Gettext.gettext(PhoenixKitWeb.Gettext, "Widgets")}
         </button>
@@ -684,7 +686,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           detected={@detected?}
           scaled={@scaled?}
         />
-        <.catalog_drawer :if={@show_catalog} catalog={@catalog} />
+        <.catalog_drawer catalog={@catalog} />
       </div>
 
       <.settings_modal
@@ -902,6 +904,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
               id="dashboard-grid"
               phx-hook="DashboardGridDrag"
               data-cols={@cols}
+              data-max-rows={PhoenixKitDashboards.Grid.max_rows()}
               class="relative grid auto-rows-[8rem] content-start gap-3"
               style={"grid-template-columns: repeat(#{@cols}, minmax(0, 1fr));"}
             >
@@ -1270,11 +1273,15 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     assigns = assign(assigns, :sections, catalog_sections(assigns.catalog))
 
     ~H"""
-    <%!-- No entrance animation: sliding in from translateX(100%) momentarily
-    overflows the container's right edge and flashes a page scrollbar. --%>
+    <%!-- Always rendered, hidden by default: JS.toggle flips display client-side
+    (LiveView keeps JS-toggled visibility across patches), so opening is
+    instant. No entrance animation: sliding in from translateX(100%)
+    momentarily overflows the container's right edge and flashes a page
+    scrollbar. --%>
     <div
       id="dashboard-catalog"
       phx-hook="DashboardCatalogDrag"
+      style="display: none"
       class="absolute bottom-0 right-0 top-0 z-20 w-72 overflow-auto border-l border-base-300 bg-base-100 shadow-xl"
     >
       <div class="flex items-center justify-between border-b border-base-300 p-3">
@@ -1283,7 +1290,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         </span>
         <button
           type="button"
-          phx-click="toggle_catalog"
+          phx-click={JS.hide(to: "#dashboard-catalog")}
           class="btn btn-ghost btn-xs btn-square"
           title={Gettext.gettext(PhoenixKitWeb.Gettext, "Close")}
         >

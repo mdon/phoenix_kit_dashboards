@@ -32,10 +32,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       # modal reserves a phantom right-edge scrollbar strip the backdrop can't cover).
       assert html =~ "scrollbar-gutter:auto"
 
-      # The catalog is a slide-over panel, CLOSED by default; the Widgets button
-      # opens it, revealing the built-ins grouped under a provider section.
-      refute html =~ "Widget catalog"
-      html = view |> element("button[phx-click='toggle_catalog']") |> render_click()
+      # The catalog is a slide-over panel, always rendered but HIDDEN by default
+      # (display none; the Widgets button toggles it client-side via JS.toggle,
+      # so opening is instant — no server round-trip to test here). Built-ins
+      # are grouped under a provider section.
+      assert html =~ ~r/id="dashboard-catalog"[^>]*style="display: none"/
       assert html =~ "Widget catalog"
       assert html =~ "Built-in"
       assert html =~ "Clock"
@@ -43,6 +44,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       assert html =~ "Module stats"
       # It overlays the grid rather than squeezing it (absolute positioning).
       assert html =~ ~r/id="dashboard-catalog"[^>]*class="[^"]*absolute/
+      # Both the toolbar button and the in-panel X are client-side commands.
+      assert view |> element("#dashboard-catalog-toggle") |> render() =~ "phx-click"
     end
 
     test "redirects to the index with a flash when the dashboard is missing", %{conn: conn} do
@@ -117,8 +120,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       {conn, user} = sign_in(conn)
       dashboard = fixture_dashboard(user.uuid)
 
-      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-      html = view |> element("button[phx-click='toggle_catalog']") |> render_click()
+      {:ok, _view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
 
       assert html =~ ~s(phx-hook="DashboardCatalogDrag")
       assert html =~ ~s(data-widget-key="core.note")
@@ -192,12 +194,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       conn = put_connect_params(conn, %{"viewport_width" => 390})
       {:ok, _view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
 
-      # Phone isn't designed → nearest designed (desktop home) scaled to fit,
-      # with the catalog starting closed so it doesn't cover the grid. A
-      # scaled preview never scales UP past 1:1 (data-fill off).
+      # Phone isn't designed → nearest designed (desktop home) scaled to fit.
+      # A scaled preview never scales UP past 1:1 (data-fill off), and the
+      # catalog panel starts hidden like everywhere else.
       assert html =~ "scaled to fit"
       assert html =~ ~s(data-fill="false")
-      refute html =~ "Widget catalog"
+      assert html =~ ~r/id="dashboard-catalog"[^>]*style="display: none"/
     end
 
     test "a size you didn't design shows the nearest designed view scaled — but editable", %{

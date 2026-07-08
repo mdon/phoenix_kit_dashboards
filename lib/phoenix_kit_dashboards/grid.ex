@@ -20,9 +20,12 @@ defmodule PhoenixKitDashboards.Grid do
   (`%{"x" => _, "y" => _, "w" => _, "h" => _}`) — no DOM, no DB.
   """
 
-  # Rows are unbounded in CSS (auto-rows creates them on demand); this cap only
-  # bounds placement scans and rejects absurd hostile coordinates.
-  @max_rows 400
+  # The full designable surface: the builder renders (and scrolls) ALL of it,
+  # so a widget can be placed on any row up front — not just near the existing
+  # content. Also bounds placement scans and hostile coordinates. 50 rows
+  # (~7000px at the default row height) keeps the scrollbar meaningful; the
+  # old 400 was a runaway bound, unusable as a real surface.
+  @max_rows 50
 
   @doc "The maximum row index + span extent a placement may reach."
   @spec max_rows() :: pos_integer()

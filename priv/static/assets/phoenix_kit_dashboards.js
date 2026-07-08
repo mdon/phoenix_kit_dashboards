@@ -211,6 +211,12 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       return isNaN(v) ? fallback : v;
     },
 
+    maxRows() {
+      var grid = document.getElementById("dashboard-grid");
+      var v = grid && parseInt(grid.getAttribute("data-max-rows"), 10);
+      return v || 50;
+    },
+
     // CSS px for a span of `n` cells given per-cell stride + gap: n cells hold
     // (n-1) inner gaps → n*stride - gap.
     spanPx(n, stride, gap) {
@@ -229,7 +235,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       if (isNaN(this.gridX) || isNaN(this.gridY)) return { w: w, h: h };
 
       w = Math.min(w, this.cols - this.gridX);
-      h = Math.min(h, 400 - this.gridY);
+      h = Math.min(h, this.maxRows() - this.gridY);
       var probeH = Math.min(this.startH, h);
       while (w > this.minW && this.cellsCollide(w, probeH)) w--;
       while (h > this.minH && this.cellsCollide(w, h)) h--;
@@ -516,6 +522,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var rect = this.el.getBoundingClientRect();
       return {
         cols: cols,
+        maxRows: this.intVal(this.el, "data-max-rows", 50),
         strideX: colW + gapX,
         strideY: rowH + gapY,
         scale: this.el.offsetWidth ? rect.width / this.el.offsetWidth : 1
@@ -650,7 +657,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var ty = Math.round(cssTop / this.m.strideY);
       tx = Math.max(0, Math.min(this.m.cols - this.w, tx));
       // Mirror the server's row cap (Grid.max_rows).
-      ty = Math.max(0, Math.min(400 - this.h, ty));
+      ty = Math.max(0, Math.min(this.m.maxRows - this.h, ty));
 
       if ((tx !== this.pos.x || ty !== this.pos.y) && !this.collides(tx, ty)) {
         this.pos = { x: tx, y: ty };
@@ -828,6 +835,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         var rect0 = this.grid.getBoundingClientRect();
         this.m = {
           cols: cols,
+          maxRows: parseInt(this.grid.getAttribute("data-max-rows"), 10) || 50,
           strideX: colW + gapX,
           strideY: rowH + gapY,
           scale: this.grid.offsetWidth ? rect0.width / this.grid.offsetWidth : 1
@@ -913,7 +921,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         var tx = Math.floor((ev.clientX - rect.left) / this.m.scale / this.m.strideX);
         var ty = Math.floor((ev.clientY - rect.top) / this.m.scale / this.m.strideY);
         tx = Math.max(0, Math.min(this.m.cols - this.w, tx));
-        ty = Math.max(0, Math.min(400 - this.h, ty));
+        ty = Math.max(0, Math.min(this.m.maxRows - this.h, ty));
         if (this.collides(tx, ty)) {
           this.target = null;
           this.hidePreview();
@@ -1135,10 +1143,26 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
       canvas.style.transformOrigin = "top left";
       canvas.style.transform = "scale(" + scale + ")";
+
+      // The spacer spans the FULL design surface (Grid.max_rows), not just the
+      // occupied rows — so every row is scroll-reachable and a widget can be
+      // placed anywhere up front. Without this, a grid shorter than the pane
+      // has no vertical scrollbar at all and its lower rows are unreachable.
+      var grid = canvas.querySelector("#dashboard-grid");
+      var surfaceH = 0;
+
+      if (grid) {
+        var gcs = getComputedStyle(grid);
+        var rowH = parseFloat(gcs.gridAutoRows) || 128;
+        var rowGap = parseFloat(gcs.rowGap) || 0;
+        var maxRows = parseInt(grid.getAttribute("data-max-rows"), 10) || 50;
+        surfaceH = maxRows * (rowH + rowGap) - rowGap;
+      }
+
       // offsetHeight is the UNSCALED layout height (transform doesn't affect it);
       // the spacer carries the scaled dims so the container scrolls + centers.
       spacer.style.width = designW * scale + "px";
-      spacer.style.height = canvas.offsetHeight * scale + "px";
+      spacer.style.height = Math.max(canvas.offsetHeight, surfaceH) * scale + "px";
       canvas.style.opacity = "1";
     },
   };

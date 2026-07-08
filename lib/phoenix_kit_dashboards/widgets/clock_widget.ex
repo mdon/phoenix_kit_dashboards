@@ -71,6 +71,8 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
     end
   end
 
+  def resolve_time(_), do: {DateTime.utc_now(), "UTC"}
+
   # Real-world offsets only (UTC-12:00 … UTC+14:00, total) — a crafted or
   # stale setting like "UTC+99:99" or the boundary-overshooting "UTC+14:59"
   # degrades to UTC instead of rendering a time shifted past any real zone.
@@ -86,8 +88,6 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
   end
 
   defp offset_time(_tz, _sign, _hours, _minutes), do: {DateTime.utc_now(), "UTC"}
-
-  def resolve_time(_), do: {DateTime.utc_now(), "UTC"}
 
   @impl true
   def update(assigns, socket) do
