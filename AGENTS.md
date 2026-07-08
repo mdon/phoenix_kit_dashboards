@@ -312,3 +312,17 @@ PR review files go in `dev_docs/pull_requests/{year}/{pr_number}-{slug}/` — a
 `CLAUDE_REVIEW.md`; never append to another agent's file). See
 `dev_docs/pull_requests/README.md` + `TEMPLATE.md`. Severity taxonomy:
 `BUG - CRITICAL/HIGH/MEDIUM`, `IMPROVEMENT - HIGH/MEDIUM`, `NITPICK`.
+
+## TODOs
+
+### Dashboard presets
+
+Offer one-click **presets** when creating (or on an empty) dashboard: the user
+picks e.g. "Overview" and gets a ready-made set of widgets already placed and
+configured (an overview preset ≈ projects board + workload + deadlines; a
+personal preset ≈ my-tasks + only-my-projects deadlines + a clock). Likely
+shape: a preset is data — a named list of `{widget_key, view, settings, size}`
+entries laid out by the same first-free packing as `add_widget/3` — and
+modules could contribute presets the same duck-typed way they contribute
+widgets. Idea noted 2026-07-08; not designed yet.
+
