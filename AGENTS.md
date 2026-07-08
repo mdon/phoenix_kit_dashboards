@@ -243,17 +243,16 @@ This matches `phoenix_kit_locations` / `phoenix_kit_catalogue`. Do **not** add a
 This module owns no DDL. The backing `phoenix_kit_dashboards` table (personal /
 system / role scopes, JSONB `layout`, `owner_user_uuid` FK → `phoenix_kit_users`
 `ON DELETE CASCADE`) ships as core migration **V133** (first released in core
-`1.7.145`). The `mix.exs` core pin floor is `~> 1.7.145` for that reason.
+`1.7.145`).
 
 The per-dashboard JSONB **`config`** column (type + home tier + customized set) ships as core
-migration **V139** — **currently unreleased**. Until it lands in a core release,
-the config-dependent features (type, home tier, customized tiers) require a core
-with V139: run the suite and the
-`phoenix_kit_parent` dev app against **local core** (`PHOENIX_KIT_PATH=../phoenix_kit`),
-where `ensure_current` builds V139. Standalone `mix test` against the published
-core is red for the config-dependent tests until the V139 release + a pin-floor
-bump (no GitHub Actions CI here, so it's "red standalone", not "CI red"). Do
-**not** bump the pin to `~> 1.7.<V139>` until that release exists.
+migration **V139**, released in core **`1.7.179`**. The config-dependent features
+(type, home tier, customized tiers) need that column, so the `mix.exs` core pin
+floor is `~> 1.7.179` — a core older than that would resolve an older pin yet lack
+the column the layout engine reads. Cross-repo work can still run against
+**local core** (`PHOENIX_KIT_PATH=../phoenix_kit`), where `ensure_current` builds
+the migration; standalone `mix test` needs a core `>= 1.7.179` for the
+config-dependent integration tests (no GitHub Actions CI here).
 
 ## Testing
 

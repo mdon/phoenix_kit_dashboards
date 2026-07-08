@@ -76,10 +76,12 @@ defmodule PhoenixKitDashboards.MixProject do
   defp deps do
     [
       # PhoenixKit provides the Module behaviour, Settings API, Repo helper, and
-      # the ModuleRegistry we query to discover widget providers. Floor is 1.7.145
-      # — the release that ships core migration V133 (the phoenix_kit_dashboards
-      # table); an older 1.7.x would resolve the pin yet have no backing table.
-      pk_dep(:phoenix_kit, "~> 1.7.145"),
+      # the ModuleRegistry we query to discover widget providers. Floor is 1.7.179
+      # — the release that ships core migration V139 (the per-dashboard `config`
+      # column: type, home tier, customized breakpoints). V133 (1.7.145) created
+      # the phoenix_kit_dashboards table; an older 1.7.x would resolve the pin yet
+      # lack the `config` column the layout engine reads.
+      pk_dep(:phoenix_kit, "~> 1.7.179"),
 
       # LiveView powers the dashboard builder and the widget LiveComponents.
       {:phoenix_live_view, "~> 1.1"},
