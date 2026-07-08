@@ -1266,15 +1266,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     assigns = assign(assigns, :sections, catalog_sections(assigns.catalog))
 
     ~H"""
+    <%!-- No entrance animation: sliding in from translateX(100%) momentarily
+    overflows the container's right edge and flashes a page scrollbar. --%>
     <div
       id="dashboard-catalog"
       phx-hook="DashboardCatalogDrag"
-      class="pk-catalog-panel absolute bottom-0 right-0 top-0 z-20 w-72 overflow-auto border-l border-base-300 bg-base-100 shadow-xl"
+      class="absolute bottom-0 right-0 top-0 z-20 w-72 overflow-auto border-l border-base-300 bg-base-100 shadow-xl"
     >
-      <style>
-        @keyframes pk-catalog-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
-        .pk-catalog-panel { animation: pk-catalog-in 0.15s ease-out; }
-      </style>
       <div class="flex items-center justify-between border-b border-base-300 p-3">
         <span class="text-sm font-semibold">
           {Gettext.gettext(PhoenixKitWeb.Gettext, "Widget catalog")}
