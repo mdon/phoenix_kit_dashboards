@@ -10,3 +10,9 @@ erl_crash.dump
 /config/*.secret.exs
 .elixir_ls/
 .expert/
+
+# Hex package tarball
+phoenix_kit_dashboards-*.tar
+
+# Logs
+*.log

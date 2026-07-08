@@ -2,17 +2,19 @@ defmodule PhoenixKitDashboards.Registry do
   @moduledoc """
   Discovers and caches the widget catalog.
 
-  The catalog is the union of:
-
-  - **Built-in widgets** shipped by this module (`PhoenixKitDashboards.Widgets`).
-  - **Provider widgets** from any discovered PhoenixKit module that defines
-    `phoenix_kit_widgets/0` (see `PhoenixKitDashboards.Widget` for the contract).
+  The catalog is the union of every PhoenixKit module that defines
+  `phoenix_kit_widgets/0` (see `PhoenixKitDashboards.Widget` for the contract).
+  **This module is one such provider** — its built-in widgets (note, clock,
+  module-stats) are exposed through the same `phoenix_kit_widgets/0` entry point
+  as any other module, so there is no special-cased "built-in" path.
 
   Discovery is convention-based — it queries `PhoenixKit.ModuleRegistry` at
-  runtime and calls `phoenix_kit_widgets/0` on any module that exports it. No new
-  core `PhoenixKit.Module` callback is required, so this ships independently of a
-  core release. (If the contract proves load-bearing, it can later be promoted
-  into the `PhoenixKit.Module` behaviour.)
+  runtime and calls `phoenix_kit_widgets/0` on any module that exports it (always
+  including `PhoenixKitDashboards` itself, so the built-ins are available even
+  before/without ModuleRegistry discovery). No new core `PhoenixKit.Module`
+  callback is required, so this ships independently of a core release. (If the
+  contract proves load-bearing, it can later be promoted into the
+  `PhoenixKit.Module` behaviour.)
 
   The result is memoized in `:persistent_term`, mirroring how core's
   `ModuleRegistry` caches tabs and permissions. Call `refresh/0` after modules
@@ -21,8 +23,8 @@ defmodule PhoenixKitDashboards.Registry do
 
   require Logger
 
+  alias PhoenixKit.Users.Auth.Scope
   alias PhoenixKitDashboards.Widget
-  alias PhoenixKitDashboards.Widgets
 
   @pt_key {__MODULE__, :catalog}
   @provider_callback :phoenix_kit_widgets
@@ -59,17 +61,32 @@ defmodule PhoenixKitDashboards.Registry do
   def list_for_scope(nil), do: list()
 
   def list_for_scope(scope) do
-    Enum.filter(list(), &visible?(&1, scope))
+    Enum.filter(list(), &visible_for_scope?(&1, scope))
+  end
+
+  @doc """
+  Whether one widget type is visible to a scope — the same gate `list_for_scope/1`
+  applies to the catalog. The render path uses it too, so a **placed** widget stops
+  rendering (and refreshing) when its module is disabled or the viewer's scope
+  lacks the module permission — placing a widget must not outlive the gate that
+  offered it. `nil` scope skips the permission half (module enablement still
+  applies); a widget with no `module_key` is always visible.
+  """
+  @spec visible_for_scope?(Widget.t(), scope :: term() | nil) :: boolean()
+  def visible_for_scope?(%Widget{module_key: nil}, _scope), do: true
+
+  def visible_for_scope?(%Widget{module_key: key}, scope) do
+    module_enabled?(key) and (is_nil(scope) or has_access?(scope, key))
   end
 
   @doc "Look up a single widget type by key."
   @spec get(String.t()) :: Widget.t() | nil
   def get(key) when is_binary(key), do: Map.get(catalog(), key)
 
-  @doc "Rebuild the catalog from built-ins + discovered providers and re-cache it."
+  @doc "Rebuild the catalog from every discovered widget provider and re-cache it."
   @spec refresh() :: %{String.t() => Widget.t()}
   def refresh do
-    widgets = builtin_widgets() ++ provider_widgets()
+    widgets = provider_widgets()
 
     catalog =
       widgets
@@ -92,11 +109,6 @@ defmodule PhoenixKitDashboards.Registry do
 
   # ── Discovery ──────────────────────────────────────────────────────
 
-  defp builtin_widgets do
-    Widgets.builtin()
-    |> Enum.flat_map(&normalize(&1, :builtin))
-  end
-
   defp provider_widgets do
     provider_modules()
     |> Enum.flat_map(fn module ->
@@ -106,19 +118,25 @@ defmodule PhoenixKitDashboards.Registry do
     end)
   end
 
-  # Ask core's ModuleRegistry for every discovered module, keep those that opt
-  # into the widget contract. Degrades gracefully if core isn't loaded.
+  # Every module that opts into the widget contract. This module is always first
+  # in the list (it's guaranteed loaded and provides the built-in widgets the same
+  # way any other module does), then core's discovered modules — deduped so it is
+  # queried once. Degrades gracefully if core's ModuleRegistry isn't loaded.
   defp provider_modules do
-    if Code.ensure_loaded?(PhoenixKit.ModuleRegistry) do
-      PhoenixKit.ModuleRegistry.all_modules()
-      |> Enum.filter(&function_exported?(&1, @provider_callback, 0))
-    else
-      []
-    end
+    discovered =
+      if Code.ensure_loaded?(PhoenixKit.ModuleRegistry) do
+        PhoenixKit.ModuleRegistry.all_modules()
+      else
+        []
+      end
+
+    [PhoenixKitDashboards | discovered]
+    |> Enum.uniq()
+    |> Enum.filter(&function_exported?(&1, @provider_callback, 0))
   rescue
     e ->
       Logger.warning("[Dashboards] Provider discovery failed: #{Exception.message(e)}")
-      []
+      [PhoenixKitDashboards]
   end
 
   defp safe_widgets(module) do
@@ -148,12 +166,6 @@ defmodule PhoenixKitDashboards.Registry do
 
   # ── Visibility ─────────────────────────────────────────────────────
 
-  defp visible?(%Widget{module_key: nil}, _scope), do: true
-
-  defp visible?(%Widget{module_key: key}, scope) do
-    module_enabled?(key) and has_access?(scope, key)
-  end
-
   defp module_enabled?(key) do
     if Code.ensure_loaded?(PhoenixKit.ModuleRegistry) do
       case PhoenixKit.ModuleRegistry.get_by_key(key) do
@@ -174,12 +186,15 @@ defmodule PhoenixKitDashboards.Registry do
   end
 
   defp has_access?(scope, key) do
-    if Code.ensure_loaded?(PhoenixKit.Users.Auth.Scope) do
-      PhoenixKit.Users.Auth.Scope.has_module_access?(scope, key)
+    if Code.ensure_loaded?(Scope) do
+      Scope.has_module_access?(scope, key)
     else
+      # No Scope module → can't evaluate a permission; allow (the widget's
+      # module_key still gates on enablement).
       true
     end
   rescue
-    _ -> true
+    # An error evaluating access fails CLOSED — don't leak a permissioned widget.
+    _ -> false
   end
 end

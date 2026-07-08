@@ -12,10 +12,11 @@ defmodule PhoenixKitDashboards do
 
   - `PhoenixKitDashboards.Widget` — the widget **type** struct + the plain-map
     provider contract (`phoenix_kit_widgets/0`).
-  - `PhoenixKitDashboards.Registry` — runtime discovery + cached catalog (built-in
-    widgets ∪ provider widgets), filtered by module enablement and permissions.
-  - `PhoenixKitDashboards.Widgets.*` — the built-in widgets (note, clock,
-    module-stats).
+  - `PhoenixKitDashboards.Registry` — runtime discovery + cached catalog (the union
+    of every module's `phoenix_kit_widgets/0`, including this one's), filtered by
+    module enablement and permissions.
+  - `PhoenixKitDashboards.Widgets.*` — this module's built-in widgets (note, clock,
+    module-stats), exposed via `phoenix_kit_widgets/0` like any other provider.
   - `PhoenixKitDashboards.Schemas.Dashboard` + `PhoenixKitDashboards.Dashboards` —
     the dashboard schema (JSONB `layout`) and its context. The backing table
     (`phoenix_kit_dashboards`) is created by core's versioned migration `V133` —
@@ -120,6 +121,21 @@ defmodule PhoenixKitDashboards do
   @impl PhoenixKit.Module
   def css_sources, do: [:phoenix_kit_dashboards]
 
+  # The grid is server-rendered; the module hooks in this bundle are progressive
+  # enhancement on top (DashboardGridDrag / DashboardCatalogDrag / DashboardResize /
+  # DashboardFreeDrag / the fit + breakpoint + fullscreen helpers — see the
+  # bundle header and AGENTS.md "The grid"). No `@impl` — older core releases don't declare the
+  # `js_sources/0` callback.
+  def js_sources do
+    [
+      %{
+        app: :phoenix_kit_dashboards,
+        file: "static/assets/phoenix_kit_dashboards.js",
+        global: "PhoenixKitDashboardsHooks"
+      }
+    ]
+  end
+
   @impl PhoenixKit.Module
   def get_config do
     %{
@@ -129,4 +145,15 @@ defmodule PhoenixKitDashboards do
   rescue
     _ -> %{enabled: false}
   end
+
+  # ── Widget provider ────────────────────────────────────────────────
+
+  @doc """
+  This module's own widgets, exposed through the **same** `phoenix_kit_widgets/0`
+  contract every other module uses (see the "Exposing widgets" section above), so
+  the Registry discovers them uniformly — the built-ins are a live worked example
+  of the contract, not a special-cased internal path.
+  """
+  @spec phoenix_kit_widgets() :: [map()]
+  def phoenix_kit_widgets, do: PhoenixKitDashboards.Widgets.builtin()
 end
