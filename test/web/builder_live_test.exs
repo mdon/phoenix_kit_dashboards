@@ -510,11 +510,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       view
       |> form("form[phx-submit='save_settings']", %{
         "view" => "compact",
-        "settings" => %{"module_key" => "posts"}
+        "settings" => %{"module_key" => "jobs"}
       })
       |> render_submit()
 
-      assert [%{"view" => "compact", "settings" => %{"module_key" => "posts"}}] =
+      assert [%{"view" => "compact", "settings" => %{"module_key" => "jobs"}}] =
                Dashboards.get(dashboard.uuid).layout
     end
 

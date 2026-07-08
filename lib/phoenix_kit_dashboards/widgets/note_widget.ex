@@ -1,9 +1,11 @@
 defmodule PhoenixKitDashboards.Widgets.NoteWidget do
   @moduledoc """
-  Built-in "Note" widget — renders a title + free-text body from its settings.
+  Built-in "Note" widget — a title + free-text body from its settings, with the
+  body rendered as **Markdown** (GFM, XSS-sanitized via core's `<.markdown>`),
+  so links, lists and emphasis actually work in a pinned note.
 
-  The simplest possible widget: pure presentation, no data loading. Use it as the
-  reference shape for a custom widget `Phoenix.LiveComponent`.
+  Otherwise the simplest possible widget: pure presentation, no data loading.
+  Use it as the reference shape for a custom widget `Phoenix.LiveComponent`.
 
   ## Widget LiveComponent contract
 
@@ -26,6 +28,8 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
   """
   use Phoenix.LiveComponent
 
+  import PhoenixKitWeb.Components.Core.Markdown, only: [markdown: 1]
+
   @impl true
   def update(assigns, socket) do
     settings = assigns[:settings] || %{}
@@ -47,14 +51,18 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
     <div class="card bg-base-100 h-full">
       <div class={["card-body", if(@compact, do: "gap-1 p-2", else: "p-4")]}>
         <h3 class={["card-title", if(@compact, do: "text-xs", else: "text-sm")]}>{@title}</h3>
-        <p class={[
-          "text-base-content/70 whitespace-pre-wrap",
+        <p :if={@body == ""} class={[
+          "text-base-content/70",
           if(@compact, do: "text-xs", else: "text-sm")
         ]}>
-          {if @body == "",
-            do: Gettext.gettext(PhoenixKitWeb.Gettext, "Empty note — open settings to add text."),
-            else: @body}
+          {Gettext.gettext(PhoenixKitWeb.Gettext, "Empty note — open settings to add text.")}
         </p>
+        <.markdown
+          :if={@body != ""}
+          content={@body}
+          compact
+          class={"text-base-content/80 " <> if(@compact, do: "text-xs", else: "text-sm")}
+        />
       </div>
     </div>
     """

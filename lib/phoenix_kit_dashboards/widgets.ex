@@ -19,7 +19,7 @@ defmodule PhoenixKitDashboards.Widgets do
       %{
         key: "core.note",
         name: "Note",
-        description: "A free-text note for reminders, links, or context.",
+        description: "A free-text note for reminders, links, or context — Markdown supported.",
         icon: "hero-pencil-square",
         component: NoteWidget,
         default_size: %{w: 4, h: 2},
@@ -83,7 +83,13 @@ defmodule PhoenixKitDashboards.Widgets do
         ],
         category: "Built-in",
         settings_schema: [
-          %{key: "module_key", type: :string, label: "Module key", default: ""}
+          %{
+            key: "module_key",
+            type: :select,
+            label: "Module",
+            options: ModuleStatsWidget.module_options(),
+            default: ""
+          }
         ]
       }
     ]

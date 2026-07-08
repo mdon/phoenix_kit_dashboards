@@ -8,9 +8,35 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
   it falls back to compact automatically when the instance is sized too small for
   a table (`size.w < 3` or `size.h < 2`). It resolves the module through core's
   `PhoenixKit.ModuleRegistry` and degrades gracefully when core isn't loaded or
-  the key is unknown.
+  the key is unknown. The settings form offers the installed modules as a
+  SELECT (`module_options/0`) — nobody should have to know registry keys.
   """
   use Phoenix.LiveComponent
+
+  @doc """
+  The installed modules that expose a `get_config/0` map, as `{label, key}`
+  select options (sorted by display name). Evaluated when the widget catalog is
+  built, so a newly installed module appears after a registry refresh.
+  """
+  @spec module_options() :: [{String.t(), String.t()}]
+  def module_options do
+    prompt = {Gettext.gettext(PhoenixKitWeb.Gettext, "Select a module…"), ""}
+
+    options =
+      if Code.ensure_loaded?(PhoenixKit.ModuleRegistry) do
+        for mod <- PhoenixKit.ModuleRegistry.all_modules(),
+            Code.ensure_loaded?(mod),
+            function_exported?(mod, :get_config, 0),
+            function_exported?(mod, :module_key, 0),
+            function_exported?(mod, :module_name, 0) do
+          {mod.module_name(), mod.module_key()}
+        end
+      else
+        []
+      end
+
+    [prompt | Enum.sort_by(options, fn {name, _} -> name end)]
+  end
 
   @impl true
   def update(assigns, socket) do
@@ -35,15 +61,13 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
     <div class="card bg-base-100 h-full">
       <div class={["card-body", if(@compact, do: "gap-0.5 p-2", else: "p-4")]}>
         <h3 class={["card-title", if(@compact, do: "text-xs", else: "text-sm")]}>
-          {if @module_key == "",
-            do: Gettext.gettext(PhoenixKitWeb.Gettext, "Module stats"),
-            else: @module_key}
+          {module_label(@module_key)}
         </h3>
 
         <p :if={@stats == %{}} class="text-sm text-base-content/50">
           {Gettext.gettext(
             PhoenixKitWeb.Gettext,
-            "No stats — set a valid module key in this widget's settings."
+            "No stats — pick a module in this widget's settings."
           )}
         </p>
 
@@ -87,6 +111,22 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
       map_size(stats) <= 1 -> "compact"
       true -> "detailed"
     end
+  end
+
+  # The module's human name for the card title (falls back to the raw key for
+  # an uninstalled/unknown module).
+  defp module_label(""), do: Gettext.gettext(PhoenixKitWeb.Gettext, "Module stats")
+
+  defp module_label(module_key) do
+    with true <- Code.ensure_loaded?(PhoenixKit.ModuleRegistry),
+         mod when not is_nil(mod) <- PhoenixKit.ModuleRegistry.get_by_key(module_key),
+         true <- function_exported?(mod, :module_name, 0) do
+      mod.module_name()
+    else
+      _ -> module_key
+    end
+  rescue
+    _ -> module_key
   end
 
   defp load_stats(""), do: %{}
