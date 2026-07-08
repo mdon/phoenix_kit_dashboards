@@ -16,6 +16,56 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 (function () {
   "use strict";
 
+  // Edge auto-scroll for drags: within 48px of the scroll pane's top/bottom
+  // edge the pane scrolls every frame (a rAF loop — pointermove stops firing
+  // while the pointer rests in the hot zone), speed scaling with depth. On a
+  // wide-but-short screen this is the only way to reach the grid's lower
+  // cells mid-drag. The retrack callback re-derives the drop target after
+  // each scroll step, since the grid moved under the stationary pointer.
+  function makeEdgeScroller(getPane, retrack) {
+    var raf = null;
+    var vel = 0;
+    var lastEv = null;
+
+    function step() {
+      raf = null;
+      var pane = getPane();
+      if (!pane || !vel) return;
+      var before = pane.scrollTop;
+      pane.scrollTop += vel;
+      if (pane.scrollTop !== before) retrack(lastEv);
+      raf = requestAnimationFrame(step);
+    }
+
+    return {
+      update: function (ev) {
+        lastEv = ev;
+        var pane = getPane();
+        if (!pane) return;
+        var r = pane.getBoundingClientRect();
+        var zone = 48;
+
+        if (ev.clientY < r.top + zone) {
+          vel = -Math.min(16, Math.ceil((r.top + zone - ev.clientY) / 3));
+        } else if (ev.clientY > r.bottom - zone) {
+          vel = Math.min(16, Math.ceil((ev.clientY - (r.bottom - zone)) / 3));
+        } else {
+          vel = 0;
+        }
+
+        if (vel && !raf) raf = requestAnimationFrame(step);
+      },
+      stop: function () {
+        vel = 0;
+        lastEv = null;
+        if (raf) {
+          cancelAnimationFrame(raf);
+          raf = null;
+        }
+      }
+    };
+  }
+
   window.PhoenixKitDashboardsHooks.DashboardFreeDrag = {
     mounted() {
       var self = this;
@@ -550,12 +600,22 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         this.el.setPointerCapture(e.pointerId);
       } catch (_e) {}
 
+      this.edge = makeEdgeScroller(
+        function () {
+          return document.getElementById("dashboard-grid-fit");
+        },
+        function () {
+          self.track();
+        }
+      );
+
       this._onMove = function (ev) {
         if (ev.pointerId !== self.pointerId) return;
         ev.preventDefault();
         self.clone.style.left = ev.clientX - self.grabDX + "px";
         self.clone.style.top = ev.clientY - self.grabDY + "px";
         self.track();
+        self.edge.update(ev);
       };
       this._onUp = function (ev) {
         if (ev.pointerId === self.pointerId) self.drop();
@@ -619,6 +679,10 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     },
 
     finish() {
+      if (this.edge) {
+        this.edge.stop();
+        this.edge = null;
+      }
       if (this._mirror) {
         this._mirror.disconnect();
         this._mirror = null;
@@ -741,6 +805,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       }
 
       this.track(ev);
+      if (this.edge) this.edge.update(ev);
     },
 
     begin() {
@@ -782,6 +847,17 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       }
 
       this.panelHidden = false;
+
+      var self = this;
+
+      this.edge = makeEdgeScroller(
+        function () {
+          return self.pane;
+        },
+        function (ev) {
+          if (ev) self.track(ev);
+        }
+      );
 
       // Floating ghost: a copy of the catalog row following the cursor.
       var r = this.entry.getBoundingClientRect();
@@ -912,6 +988,10 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     },
 
     cleanup() {
+      if (this.edge) {
+        this.edge.stop();
+        this.edge = null;
+      }
       this.el.style.visibility = "";
       if (this.ghost) {
         this.ghost.remove();
@@ -1045,10 +1125,13 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var avail = this.el.clientWidth - pad;
       if (avail <= 0) return;
 
-      // In fullscreen the design fills the screen (can scale up); otherwise shrink
-      // to fit and never blow a small design up past 1:1.
+      // Fill (scale up past 1:1) in fullscreen and on the viewer's NATIVE tier
+      // (data-fill) — a wide monitor shouldn't waste dead margins beside its
+      // own tier's grid. A DIFFERENT tier's preview stays capped at 1:1 so a
+      // phone design isn't blown up comically on a desktop.
       var fullscreen = document.fullscreenElement && document.fullscreenElement.contains(this.el);
-      var scale = fullscreen ? avail / designW : Math.min(1, avail / designW);
+      var fill = fullscreen || this.el.getAttribute("data-fill") === "true";
+      var scale = fill ? avail / designW : Math.min(1, avail / designW);
 
       canvas.style.transformOrigin = "top left";
       canvas.style.transform = "scale(" + scale + ")";

@@ -174,6 +174,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       refute html =~ ~r/pk-grid-ready[^"]*\bhidden\b/
       assert html =~ ~s(data-cols="16")
       refute html =~ "scaled to fit"
+      # Native tier → the grid scales up to FILL the pane (no dead margins).
+      assert html =~ ~s(data-fill="true")
 
       # A late hook report is the fallback path arriving twice — ignored.
       html = render_hook(view, "detect_bp", %{"bp" => "phone"})
@@ -191,8 +193,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       {:ok, _view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
 
       # Phone isn't designed → nearest designed (desktop home) scaled to fit,
-      # with the catalog starting closed so it doesn't cover the grid.
+      # with the catalog starting closed so it doesn't cover the grid. A
+      # scaled preview never scales UP past 1:1 (data-fill off).
       assert html =~ "scaled to fit"
+      assert html =~ ~s(data-fill="false")
       refute html =~ "Widget catalog"
     end
 

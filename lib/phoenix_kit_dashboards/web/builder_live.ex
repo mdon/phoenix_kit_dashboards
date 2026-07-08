@@ -879,10 +879,14 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           {Gettext.gettext(PhoenixKitWeb.Gettext, "layout, scaled to fit your screen.")}
         </span>
       </div>
+      <%!-- data-fill: on the viewer's NATIVE tier the grid scales UP past 1:1 to
+      fill the pane (no dead margins on a wide monitor); other tiers' previews
+      stay capped at 1:1. --%>
       <div
         id="dashboard-grid-fit"
         phx-hook="DashboardGridFit"
         data-design-width={@preview_width}
+        data-fill={to_string(not @scaled)}
         class="flex-1 overflow-auto bg-base-200 p-4"
         style="scrollbar-gutter: stable;"
       >
