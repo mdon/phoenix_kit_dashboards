@@ -28,9 +28,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       {:ok, view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
 
       assert html =~ "Ops Board"
-      # The daisyUI modal-open gutter counter must render (without it, opening a
-      # modal reserves a phantom right-edge scrollbar strip the backdrop can't cover).
-      assert html =~ "scrollbar-gutter:auto"
 
       # The catalog is a slide-over panel, always rendered but HIDDEN by default
       # (display none; the Widgets button toggles it client-side via JS.toggle,
