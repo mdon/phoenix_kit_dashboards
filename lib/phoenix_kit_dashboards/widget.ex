@@ -38,7 +38,10 @@ defmodule PhoenixKitDashboards.Widget do
 
   `:component` is a `Phoenix.LiveComponent` module. The dashboard host renders it
   with `<.live_component module={w.component} id={instance_id} settings={...}
-  scope={...} />`, so each widget owns its own data loading and refresh lifecycle.
+  view={...} size={%{w: w, h: h}} scope={...} />` — the selected view key and the
+  instance's current span ride along, so one widget can render several
+  densities/layouts. Each widget owns its own data loading and refresh
+  lifecycle.
 
   ## Settings schema
 
@@ -48,6 +51,8 @@ defmodule PhoenixKitDashboards.Widget do
         options: ["7d", "30d", "90d"], default: "30d"}
 
   Supported `:type` values: `:string`, `:text`, `:number`, `:boolean`, `:select`.
+  Select `options` may be plain strings or `{label, value}` tuples (the label is
+  translated at render when a translation exists).
   """
 
   alias PhoenixKitDashboards.Breakpoints
@@ -72,8 +77,10 @@ defmodule PhoenixKitDashboards.Widget do
             # `min_size` (an analog clock needs a squarer floor than a text
             # one) — resolved via `min_size_for/2`.
             views: [],
-            # Live refresh: when set (milliseconds), the host periodically
-            # `send_update/2`s the widget so it re-queries. nil = static.
+            # Live refresh: when set (milliseconds, floored to 1000 so a
+            # provider can't pin the host into a tight loop), the host
+            # periodically `send_update/2`s the widget so it re-queries.
+            # nil = static.
             refresh_interval: nil,
             category: "General",
             # The provider module that contributed this widget (via its
@@ -92,7 +99,7 @@ defmodule PhoenixKitDashboards.Widget do
           required(:key) => String.t(),
           required(:type) => :string | :text | :number | :boolean | :select,
           optional(:label) => String.t(),
-          optional(:options) => [String.t()],
+          optional(:options) => [String.t() | {String.t(), String.t()}],
           optional(:default) => term()
         }
 

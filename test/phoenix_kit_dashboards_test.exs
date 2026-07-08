@@ -38,6 +38,15 @@ defmodule PhoenixKitDashboardsTest do
     test "css sources" do
       assert PhoenixKitDashboards.css_sources() == [:phoenix_kit_dashboards]
     end
+
+    test "js_sources declares the hook bundle, and the file actually ships" do
+      assert [%{app: :phoenix_kit_dashboards, file: file, global: "PhoenixKitDashboardsHooks"}] =
+               PhoenixKitDashboards.js_sources()
+
+      # A rename of the asset would silently break every host bundle otherwise.
+      path = Application.app_dir(:phoenix_kit_dashboards, "priv/#{file}")
+      assert File.exists?(path), "js_sources points at a missing file: #{path}"
+    end
   end
 
   describe "widget registry" do
@@ -226,6 +235,23 @@ defmodule PhoenixKitDashboardsTest do
       # Enum is loaded but is not a Phoenix.LiveComponent.
       assert {:error, {:not_a_live_component, Enum}} =
                Widget.from_map(%{key: "x", name: "Y", component: Enum}, :prov)
+    end
+
+    test "select options may be {label, value} tuples (kept through normalization)" do
+      {:ok, widget} =
+        Widget.from_map(
+          %{
+            key: "x",
+            name: "Y",
+            component: DummyComponent,
+            settings_schema: [
+              %{key: "m", type: :select, options: [{"Pretty", "ugly_key"}], default: ""}
+            ]
+          },
+          :prov
+        )
+
+      assert [%{options: [{"Pretty", "ugly_key"}]}] = widget.settings_schema
     end
 
     test "normalizes settings_schema and drops malformed fields" do

@@ -5,7 +5,7 @@
 // construction and resolve on LiveView navigation.
 //
 // All hooks are progressive enhancement — both dashboard types stay operable
-// without JS via the Settings modal inputs / arrow nudges:
+// without JS via the Settings modal inputs:
 //   DashboardGridDrag  — grid cell placement (drag a widget to any free cell)
 //   DashboardFreeDrag  — pixel-canvas move (left/top px)
 //   DashboardResize    — corner resize (cells in grid, px in pixel mode)
@@ -77,7 +77,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         // start a drag that never sees its pointerup.
         if (e.button != null && e.button !== 0) return;
         // The whole top bar is the handle, but its buttons (settings/remove/
-        // nudges) must stay buttons — a press on them never starts a drag.
+        // restack) must stay buttons — a press on them never starts a drag.
         if (e.target.closest("button, a, input, select, textarea, label")) return;
         var handle = e.target.closest(".pk-free-handle");
         if (!handle || !self.el.contains(handle)) return;
@@ -1138,9 +1138,9 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
   };
 
   // `DashboardGridFit` — lays the grid out at its design width (`data-design-width`)
-  // and scales it via transform to fit the available space: shrink-to-fit normally,
-  // FILL when fullscreen (a TV). Editable at any scale — SortableJS + the resize hook
-  // are transform-aware. Re-fits on resize / fullscreen change (both fire the RO).
+  // and scales it via transform to fit the available space: shrink-to-fit for a
+  // different tier's preview; FILL (past 1:1) on the native tier + fullscreen.
+  // Editable at any scale — the drag + resize hooks are transform-aware. Re-fits on resize / fullscreen change (both fire the RO).
   window.PhoenixKitDashboardsHooks.DashboardGridFit = {
     mounted() {
       var self = this;

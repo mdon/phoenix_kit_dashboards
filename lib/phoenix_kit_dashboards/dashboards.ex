@@ -46,13 +46,6 @@ defmodule PhoenixKitDashboards.Dashboards do
     repo().all(query)
   end
 
-  @doc "All system/shared dashboards (admin-managed)."
-  @spec list_system() :: [Dashboard.t()]
-  def list_system do
-    query = from(d in Dashboard, where: d.scope == "system", order_by: [asc: d.position])
-    repo().all(query)
-  end
-
   @doc "Fetch one dashboard by uuid, or nil."
   @spec get(String.t()) :: Dashboard.t() | nil
   def get(uuid) when is_binary(uuid), do: repo().get(Dashboard, uuid)
@@ -76,9 +69,12 @@ defmodule PhoenixKitDashboards.Dashboards do
   """
   @spec get_or_create_default(user_uuid :: String.t()) :: Dashboard.t()
   def get_or_create_default(user_uuid) when is_binary(user_uuid) do
+    # Ordered so a duplicate default (a rare concurrent-first-access race — no
+    # unique index guards is_default) resolves to the SAME row on every read.
     query =
       from(d in Dashboard,
         where: d.owner_user_uuid == ^user_uuid and d.is_default == true,
+        order_by: [asc: d.inserted_at, asc: d.uuid],
         limit: 1
       )
 
@@ -191,7 +187,9 @@ defmodule PhoenixKitDashboards.Dashboards do
         layout: layout,
         config: source.config
       },
-      opts
+      # A clone logs as dashboard.created like any create, but stays
+      # distinguishable in the audit trail via the source pointer.
+      Keyword.put(opts, :log_extra, %{"cloned_from" => source.uuid})
     )
   end
 
@@ -1028,7 +1026,9 @@ defmodule PhoenixKitDashboards.Dashboards do
   defp log_on_ok({:ok, %Dashboard{} = dashboard} = result, action, opts, extra_metadata) do
     if Code.ensure_loaded?(PhoenixKit.Activity) do
       metadata =
-        Map.merge(%{"title" => dashboard.title, "scope" => dashboard.scope}, extra_metadata)
+        %{"title" => dashboard.title, "scope" => dashboard.scope}
+        |> Map.merge(extra_metadata)
+        |> Map.merge(Keyword.get(opts, :log_extra, %{}))
 
       PhoenixKit.Activity.log(%{
         action: action,

@@ -138,7 +138,14 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       {:ok, shared} = Dashboards.set_layout_mode(shared, "free")
       [%{"id" => source_id}] = shared.layout
 
-      assert {:ok, clone} = Dashboards.clone(shared, user.uuid)
+      assert {:ok, clone} = Dashboards.clone(shared, user.uuid, actor_uuid: user.uuid)
+
+      # A clone logs as a create but stays distinguishable in the audit trail.
+      assert_activity_logged("dashboard.created",
+        actor_uuid: user.uuid,
+        resource_uuid: clone.uuid,
+        metadata_has: %{"cloned_from" => shared.uuid}
+      )
 
       assert clone.scope == "personal"
       assert clone.owner_user_uuid == user.uuid
@@ -423,6 +430,13 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       # A far-out x clamps to the right edge instead of failing.
       assert {:ok, added} = Dashboards.add_widget_at(d, "core.clock", "desktop", 99, 0)
       assert %{"x" => 9, "y" => 0} = Layout.placement(List.last(added.layout), "desktop")
+    end
+
+    test "add_widget_at and add_widget_px reject an unknown widget key", %{dashboard: d} do
+      assert {:error, :unknown_widget} =
+               Dashboards.add_widget_at(d, "nope.missing", "desktop", 0, 0)
+
+      assert {:error, :unknown_widget} = Dashboards.add_widget_px(d, "nope.missing", 10, 10)
     end
 
     test "add_widget_px drops a catalog widget at exact canvas px", %{dashboard: d} do

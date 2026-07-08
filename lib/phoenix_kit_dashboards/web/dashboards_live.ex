@@ -14,9 +14,15 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
   require Logger
 
   import PhoenixKitDashboards.Web.Helpers,
-    only: [actor_uuid: 1, actor_opts: 1, user_role_uuids: 1]
+    only: [
+      actor_uuid: 1,
+      actor_opts: 1,
+      user_role_uuids: 1,
+      scope_label: 1,
+      gutter_fix_style: 0,
+      list_roles: 0
+    ]
 
-  alias PhoenixKit.Users.Roles
   alias PhoenixKitDashboards.Dashboards
   alias PhoenixKitDashboards.Paths
   alias PhoenixKitDashboards.Schemas.Dashboard
@@ -25,7 +31,7 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(:page_title, "Dashboards")
+     |> assign(:page_title, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboards"))
      |> assign(:roles, list_roles())
      |> assign(:show_create, false)
      |> load_dashboards()}
@@ -47,7 +53,11 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
     type = if params["type"] == "pixel", do: "pixel", else: "grid"
 
     attrs =
-      %{title: blank_to_default(title, "Untitled Dashboard"), config: %{"type" => type}}
+      %{
+        title:
+          blank_to_default(title, Gettext.gettext(PhoenixKitWeb.Gettext, "Untitled Dashboard")),
+        config: %{"type" => type}
+      }
       |> Map.merge(scope_attrs(params, socket))
 
     case Dashboards.create(attrs, actor_opts(socket)) do
@@ -125,13 +135,6 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
   defp scope_attrs(_params, socket),
     do: %{scope: "personal", owner_user_uuid: actor_uuid(socket)}
 
-  # All roles for the create picker (empty when the roles API is unavailable).
-  defp list_roles do
-    if Code.ensure_loaded?(Roles), do: Roles.list_roles(), else: []
-  rescue
-    _ -> []
-  end
-
   # Role-scoped dashboards aren't exposed in the create modal for now — but the
   # context, visibility rules, and list still support them, so re-enabling is a
   # one-liner: return `roles != []`.
@@ -167,19 +170,6 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
       "pixel" -> Gettext.gettext(PhoenixKitWeb.Gettext, "Pixel")
       _ -> Gettext.gettext(PhoenixKitWeb.Gettext, "Grid")
     end
-  end
-
-  defp scope_label("personal"), do: Gettext.gettext(PhoenixKitWeb.Gettext, "personal")
-  defp scope_label("system"), do: Gettext.gettext(PhoenixKitWeb.Gettext, "shared")
-  defp scope_label("role"), do: Gettext.gettext(PhoenixKitWeb.Gettext, "role")
-  defp scope_label(other), do: other
-
-  # Counters daisyUI's modal-open `scrollbar-gutter: stable` — see BuilderLive.
-  defp gutter_fix_style do
-    Phoenix.HTML.raw(
-      "<style>:root:has(.modal-open, .modal[open], .modal:target, .modal-toggle:checked)" <>
-        "{scrollbar-gutter:auto}</style>"
-    )
   end
 
   defp blank_to_default(nil, default), do: default

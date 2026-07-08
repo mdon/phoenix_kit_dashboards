@@ -127,7 +127,11 @@ defmodule PhoenixKitDashboards.Web.DashboardsLiveTest do
 
       assert html =~ "Dashboard deleted."
       assert Dashboards.get(dashboard.uuid) == nil
-      assert_activity_logged("dashboard.deleted", resource_uuid: dashboard.uuid)
+
+      assert_activity_logged("dashboard.deleted",
+        resource_uuid: dashboard.uuid,
+        actor_uuid: user.uuid
+      )
     end
 
     test "an admin can delete a shared/system dashboard", %{conn: conn} do

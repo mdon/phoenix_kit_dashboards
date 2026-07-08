@@ -45,7 +45,15 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   require Logger
 
   import PhoenixKitDashboards.Web.Helpers,
-    only: [actor_uuid: 1, actor_opts: 1, user_role_uuids: 1]
+    only: [
+      actor_uuid: 1,
+      actor_opts: 1,
+      user_role_uuids: 1,
+      scope_label: 1,
+      bp_label: 1,
+      gutter_fix_style: 0,
+      translate_catalog: 1
+    ]
 
   alias Phoenix.LiveView.JS
   alias PhoenixKitDashboards.Breakpoints
@@ -59,8 +67,9 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # How often the host checks whether any live widget is due for a refresh.
   @refresh_tick_ms 1000
 
-  # Minimum pixel-canvas widget size (mirrors the context's px clamp).
+  # Pixel-canvas widget size bounds (mirror the context's px clamps).
   @free_min_px 60
+  @free_max_px 4000
 
   @impl true
   def mount(_params, _session, socket) do
@@ -265,7 +274,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       # The user already tapped a size before this arrived — keep their choice, but
       # still record their real screen so `scaled?` (view ≠ their size) is correct.
       socket.assigns.bp_manual? ->
-        {:ok, dashboard} = Dashboards.put_home_bp(socket.assigns.dashboard, screen_bp)
+        dashboard = put_home_bp_or_keep(socket.assigns.dashboard, screen_bp)
 
         {:noreply,
          socket
@@ -532,12 +541,22 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       else: socket
   end
 
+  # Record the home tier, degrading to the unchanged dashboard on a transient
+  # DB error (every other write path here degrades too — a failed nicety write
+  # must not crash the LiveView).
+  defp put_home_bp_or_keep(dashboard, screen_bp) do
+    case Dashboards.put_home_bp(dashboard, screen_bp) do
+      {:ok, updated} -> updated
+      {:error, _} -> dashboard
+    end
+  end
+
   # The user's real screen tier is known (connect params or the detect hook):
   # show a DESIGNED view — this tier if designed, else the nearest one scaled to
   # fit — never a freshly-derived layout. Records the home tier on a brand-new
   # dashboard.
   defp apply_screen_bp(socket, screen_bp) do
-    {:ok, dashboard} = Dashboards.put_home_bp(socket.assigns.dashboard, screen_bp)
+    dashboard = put_home_bp_or_keep(socket.assigns.dashboard, screen_bp)
     active_bp = Dashboards.display_bp(dashboard, screen_bp)
     scaled? = active_bp != screen_bp
 
@@ -595,16 +614,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   defp maybe_place(dashboard, _id, _bp, _params), do: {:ok, dashboard}
 
-  # Counters daisyUI's modal/drawer-open `scrollbar-gutter: stable` (the layered
-  # zero-specificity original loses to this unlayered rule). Same rule ships in
-  # core's admin layout now — delete this helper once the core pin includes it.
-  defp gutter_fix_style do
-    Phoenix.HTML.raw(
-      "<style>:root:has(.modal-open, .modal[open], .modal:target, .modal-toggle:checked)" <>
-        "{scrollbar-gutter:auto}</style>"
-    )
-  end
-
   # Pulse the just-moved widget green/red (`sortable:flash`, answered by the
   # DashboardGridDrag hook).
   defp flash_sortable(socket, nil, _status), do: socket
@@ -646,7 +655,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
             <.icon name="hero-arrow-left" class="w-4 h-4" />
           </.link>
           <h1 class="text-lg font-semibold">{@dashboard.title}</h1>
-          <span class="badge badge-ghost badge-sm">{@dashboard.scope}</span>
+          <span class="badge badge-ghost badge-sm">{scope_label(@dashboard.scope)}</span>
         </div>
         <div class="flex items-center gap-2">
           <button
@@ -787,11 +796,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           type="button"
           phx-click="set_bp"
           phx-value-bp={bp.key}
-          title={"#{bp.label} · #{bp.cols} cols"}
+          title={"#{bp_label(bp.key)} · #{bp.cols} " <> Gettext.gettext(PhoenixKitWeb.Gettext, "columns")}
           class={["join-item btn btn-xs gap-1", @active_bp == bp.key && "btn-primary"]}
         >
           <.icon name={bp_icon(bp.key)} class="w-3.5 h-3.5" />
-          <span class="hidden sm:inline">{bp.label}</span>
+          <span class="hidden sm:inline">{bp_label(bp.key)}</span>
         </button>
       </div>
 
@@ -828,7 +837,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         items: Dashboards.resolve_items(assigns.dashboard, assigns.active_bp),
         cols: bp.cols,
         preview_width: bp.preview_width,
-        bp_label: bp.label
+        bp_label: bp_label(bp.key)
       )
 
     ~H"""
@@ -1027,6 +1036,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
             type="button"
             phx-click="remove_widget"
             phx-value-id={@inst["id"]}
+            phx-disable-with="…"
             data-confirm={Gettext.gettext(PhoenixKitWeb.Gettext, "Remove this widget?")}
             class="btn btn-ghost btn-xs btn-square text-error"
             title={Gettext.gettext(PhoenixKitWeb.Gettext, "Remove")}
@@ -1293,8 +1303,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           >
             <.icon name={widget.icon} class="w-5 h-5 mt-0.5 text-base-content/60" />
             <span>
-              <span class="block text-sm font-medium">{widget.name}</span>
-              <span class="block text-xs text-base-content/50">{widget.description}</span>
+              <span class="block text-sm font-medium">{translate_catalog(widget.name)}</span>
+              <span class="block text-xs text-base-content/50">
+                {translate_catalog(widget.description)}
+              </span>
             </span>
           </button>
         </div>
@@ -1348,6 +1360,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         limits: size_limits(assigns.instance, assigns.active_bp),
         free?: assigns.mode == "free",
         free_min_px: @free_min_px,
+        free_max_px: @free_max_px,
         fw: fw,
         fh: fh,
         fx: fx,
@@ -1365,7 +1378,9 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     <.modal show={true} on_close="close_settings" id="widget-settings-modal">
       <:title>
         {Gettext.gettext(PhoenixKitWeb.Gettext, "Widget settings")}
-        <span :if={@widget} class="text-base-content/50 text-sm">— {@widget.name}</span>
+        <span :if={@widget} class="text-base-content/50 text-sm">
+          — {translate_catalog(@widget.name)}
+        </span>
       </:title>
 
       <form phx-submit="save_settings" class="flex flex-col gap-3">
@@ -1374,7 +1389,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
             name="view"
             label={Gettext.gettext(PhoenixKitWeb.Gettext, "View")}
             value={@instance["view"]}
-            options={Enum.map(@widget.views, fn v -> {v.name, v.key} end)}
+            options={Enum.map(@widget.views, fn v -> {translate_catalog(v.name), v.key} end)}
           />
           <div :if={@widget}>
             <span class="label-text text-sm">
@@ -1388,7 +1403,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 name="fw"
                 value={@fw}
                 min={@free_min_px}
-                max="4000"
+                max={@free_max_px}
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Width")}
               />
               <.input
@@ -1396,7 +1411,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 name="fh"
                 value={@fh}
                 min={@free_min_px}
-                max="4000"
+                max={@free_max_px}
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Height")}
               />
               <.input
@@ -1509,7 +1524,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   defp settings_field(%{field: %{type: :text}} = assigns) do
     ~H"""
-    <.textarea name={"settings[#{@field.key}]"} label={@field[:label] || @field.key} value={@value} />
+    <.textarea name={"settings[#{@field.key}]"} label={translate_catalog(@field[:label]) || @field.key} value={@value} />
     """
   end
 
@@ -1517,7 +1532,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     ~H"""
     <.checkbox
       name={"settings[#{@field.key}]"}
-      label={@field[:label] || @field.key}
+      label={translate_catalog(@field[:label]) || @field.key}
       checked={@value in [true, "true"]}
     />
     """
@@ -1527,7 +1542,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     ~H"""
     <.select
       name={"settings[#{@field.key}]"}
-      label={@field[:label] || @field.key}
+      label={translate_catalog(@field[:label]) || @field.key}
       value={@value}
       options={@field[:options] || []}
     />
@@ -1539,7 +1554,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     <.input
       type={if @field.type == :number, do: "number", else: "text"}
       name={"settings[#{@field.key}]"}
-      label={@field[:label] || @field.key}
+      label={translate_catalog(@field[:label]) || @field.key}
       value={@value}
     />
     """

@@ -17,13 +17,13 @@ defmodule PhoenixKitDashboards.Schemas.Dashboard do
         "bp"         => %{"desktop" => %{"w" => 6, "h" => 2, "hidden" => false, "pos" => 0}, ...}
       }                                            # grid: per-breakpoint span/order/visibility
 
-  Grid dashboards are a **responsive flow** — a widget's place is its `pos` in the
-  active breakpoint, spanning `w` of that tier's columns (TV 16 / Desktop 12 /
-  iPad 8 / Phone 4; see `PhoenixKitDashboards.Breakpoints`) and `h` rows. Pixel
-  dashboards use `pixel` (absolute px). The `config` JSONB column holds
+  Grid dashboards place each widget at explicit cells per breakpoint tier —
+  `%{x, y, w, h, hidden, pos}` under `"bp"` (TV 16 / Desktop 12 / iPad 8 /
+  Phone 4 columns; see `PhoenixKitDashboards.Breakpoints`). Pixel dashboards
+  use `pixel` (absolute px + z-order). The `config` JSONB column holds
   dashboard-level state: `"type"` (`"grid"` | `"pixel"`, fixed at creation),
-  per-breakpoint `"breakpoints"` metadata (`%{bp => %{"state" => "custom"}}`), and
-  `"zoom"` (pixel).
+  `"home_bp"`, and per-breakpoint `"breakpoints"` metadata
+  (`%{bp => %{"state" => "custom"}}`).
 
   ## Scope
 
@@ -70,7 +70,7 @@ defmodule PhoenixKitDashboards.Schemas.Dashboard do
     field(:scope, :string, default: "personal")
     field(:layout, {:array, :map}, default: [])
     # Dashboard-level config (JSONB): "type" ("grid"|"pixel"), per-bp "breakpoints"
-    # metadata, "zoom" (pixel).
+    # metadata,.
     field(:config, :map, default: %{})
     field(:is_default, :boolean, default: false)
     field(:position, :integer, default: 0)
@@ -114,17 +114,9 @@ defmodule PhoenixKitDashboards.Schemas.Dashboard do
     change(dashboard, config: config)
   end
 
-  @doc "List of valid scope strings."
-  @spec scopes() :: [String.t()]
-  def scopes, do: @scopes
-
   @doc "List of valid layout-mode strings."
   @spec layout_modes() :: [String.t()]
   def layout_modes, do: @layout_modes
-
-  @doc "List of valid dashboard type strings."
-  @spec types() :: [String.t()]
-  def types, do: @types
 
   @doc """
   The dashboard's fixed **type** — `"grid"` (responsive breakpoints) or `"pixel"`

@@ -91,9 +91,13 @@ end
 ```
 
 The widget's `:component` LiveComponent receives `:settings` (its per-instance
-customizations) and `:scope` (the current user's scope) as assigns. See
-`PhoenixKitDashboards.Widgets.NoteWidget` for the smallest reference component
-and `PhoenixKitDashboards.Widget` for the full contract.
+customizations), `:view` (the selected render variant, or `nil`), `:size`
+(`%{w:, h:}` — the instance's current span, for density-aware rendering) and
+`:scope` (the current user's scope) as assigns. Widgets with live data declare
+`refresh_interval` (ms, floored to 1s) and are re-`send_update/2`d by the host.
+See `PhoenixKitDashboards.Widgets.NoteWidget` for the smallest reference
+component, `Widgets.ClockWidget` for the full view/size/settings shape, and
+`PhoenixKitDashboards.Widget` for the whole contract.
 
 ## Architecture
 

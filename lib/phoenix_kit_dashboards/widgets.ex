@@ -8,9 +8,39 @@ defmodule PhoenixKitDashboards.Widgets do
   are also a worked reference for module authors.
   """
 
+  use Gettext, backend: PhoenixKitWeb.Gettext
+
   alias PhoenixKitDashboards.Widgets.ClockWidget
   alias PhoenixKitDashboards.Widgets.ModuleStatsWidget
   alias PhoenixKitDashboards.Widgets.NoteWidget
+
+  # Catalog strings are DATA (the provider contract passes plain maps), so they
+  # are translated dynamically at render (`Web.Helpers.translate_catalog/1`).
+  # The extractor only sees literals — this anchor keeps the built-ins' strings
+  # in the POT files. (Provider modules own their catalog strings the same way.)
+  @doc false
+  def __catalog_strings__ do
+    [
+      gettext_noop("Note"),
+      gettext_noop("A free-text note for reminders, links, or context — Markdown supported."),
+      gettext_noop("Title"),
+      gettext_noop("Body"),
+      gettext_noop("Clock"),
+      gettext_noop("Current time — normal, digital or analog, with a per-clock timezone."),
+      gettext_noop("Normal"),
+      gettext_noop("Digital"),
+      gettext_noop("Analog"),
+      gettext_noop("Label"),
+      gettext_noop("Timezone"),
+      gettext_noop("Show timezone"),
+      gettext_noop("Time format"),
+      gettext_noop("Module stats"),
+      gettext_noop("Show the config/stats map any PhoenixKit module exposes via get_config/0."),
+      gettext_noop("Detailed (table)"),
+      gettext_noop("Compact (counts)"),
+      gettext_noop("Module")
+    ]
+  end
 
   @doc "List of built-in widget definitions (plain maps)."
   @spec builtin() :: [map()]

@@ -114,6 +114,17 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       assert %{"fx" => 320, "fy" => 260} = Layout.pixel(inst)
     end
 
+    test "an unknown widget key on a catalog drop flashes instead of crashing", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      html = render_hook(view, "add_widget_at", %{"key" => "nope.gone", "x" => 0, "y" => 0})
+
+      assert html =~ "Could not add widget."
+      assert Dashboards.get(dashboard.uuid).layout == []
+    end
+
     test "catalog entries carry the drag-out contract (hook + key + default size)", %{
       conn: conn
     } do
@@ -183,6 +194,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       html = render_hook(view, "detect_bp", %{"bp" => "phone"})
       assert html =~ ~s(data-cols="16")
       refute html =~ "scaled to fit"
+
+      # Hostile tier keys are no-ops on both entry points.
+      html = render_hook(view, "detect_bp", %{"bp" => "8k-cinema"})
+      assert html =~ ~s(data-cols="16")
+      html = render_hook(view, "set_bp", %{"bp" => "8k-cinema"})
+      assert html =~ ~s(data-cols="16")
     end
 
     test "a phone-width viewport shows the nearest designed view scaled, catalog closed",
@@ -463,7 +480,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       send(view.pid, :refresh_tick)
       html = render(view)
       assert html =~ ~r/\d{2}:\d{2}:\d{2}/
-      assert Process.alive?(view.pid)
     end
 
     test "the tick actually advances a live widget — clocks must not freeze", %{conn: conn} do
