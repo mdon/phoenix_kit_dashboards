@@ -354,7 +354,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       refute html =~ ~s(phx-click="set_mode")
     end
 
-    test "a pixel dashboard renders the free canvas + zoom, no mode toggle", %{conn: conn} do
+    test "a pixel dashboard renders the free canvas — no Layout bar, no zoom, no tiers",
+         %{conn: conn} do
       {conn, user} = sign_in(conn)
       dashboard = fixture_dashboard(user.uuid, %{config: %{"type" => "pixel"}})
       {:ok, _} = Dashboards.add_widget(dashboard, "core.note")
@@ -362,25 +363,50 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       {:ok, _view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
 
       assert html =~ ~s(phx-hook="DashboardFreeFit")
-      assert html =~ ~s(phx-click="zoom")
-      assert html =~ "Pixel"
-      refute html =~ ~s(phx-click="set_mode")
+      # Parity with grid where it matters, minus what pixel doesn't need.
+      refute html =~ ~s(phx-click="zoom")
+      refute html =~ ~s(phx-click="set_bp")
       refute html =~ ~s(phx-hook="DashboardGridDrag")
+      assert html =~ ~s(phx-hook="DashboardFullscreen")
+      # Widgets can be overlapped deliberately: z-order controls in the bar.
+      assert html =~ ~s(phx-click="restack_widget")
+      assert html =~ "z-index: 0;"
     end
 
-    test "move_widget nudges the free-canvas position by px", %{conn: conn} do
+    test "restack_widget orders overlapping pixel widgets by z", %{conn: conn} do
       {conn, user} = sign_in(conn)
       dashboard = fixture_dashboard(user.uuid, %{config: %{"type" => "pixel"}})
       {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
-      # Seed a known px position so the nudge delta is unambiguous.
-      [%{"id" => id}] = dashboard.layout
-      {:ok, _} = Dashboards.place_widget_px(dashboard, id, 100, 50)
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.clock")
+      [a, _b] = Enum.map(dashboard.layout, & &1["id"])
 
       {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-      render_click(view, "move_widget", %{"id" => id, "dir" => "right"})
+      html = render_click(view, "restack_widget", %{"id" => a, "dir" => "front"})
+      assert html =~ "z-index: 1;"
 
-      # Nudge steps by @free_nudge_px (10) — free px, not a grid cell.
-      assert %{"fx" => 110, "fy" => 50} = pixel(dashboard.uuid)
+      reloaded = Dashboards.get(dashboard.uuid)
+      assert Layout.pixel(hd(reloaded.layout))["z"] == 1
+    end
+
+    test "the settings modal X/Y inputs place a pixel widget (no-drag fallback)", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid, %{config: %{"type" => "pixel"}})
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
+      [%{"id" => id}] = dashboard.layout
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      view |> element("button[phx-click='open_settings'][phx-value-id='#{id}']") |> render_click()
+
+      view
+      |> form("form[phx-submit='save_settings']", %{
+        "fw" => "300",
+        "fh" => "200",
+        "fx" => "120",
+        "fy" => "80"
+      })
+      |> render_submit()
+
+      assert %{"fx" => 120, "fy" => 80, "fw" => 300, "fh" => 200} = pixel(dashboard.uuid)
     end
 
     test "move_widget_to places a widget at an absolute px position (drag hook)", %{conn: conn} do

@@ -712,11 +712,35 @@ defmodule PhoenixKitDashboards.Dashboards do
     end
   end
 
-  @doc "Set the pixel-mode zoom percentage (clamped 50–150). Not activity-logged."
-  @spec set_zoom(Dashboard.t(), integer()) ::
+  @doc """
+  Restack a pixel widget: `"front"` puts it above every other widget's z,
+  `"back"` below. Overlap is allowed on the free canvas — z-order makes it
+  deliberate. A layout tweak — not activity-logged.
+  """
+  @spec restack_widget_px(Dashboard.t(), instance_id :: String.t(), String.t()) ::
           {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
-  def set_zoom(%Dashboard{} = dashboard, zoom) when is_integer(zoom) do
-    put_config(dashboard, "zoom", clamp(zoom, 50, 150))
+  def restack_widget_px(%Dashboard{} = dashboard, instance_id, dir)
+      when dir in ["front", "back"] do
+    others =
+      for inst <- dashboard.layout, inst["id"] != instance_id do
+        pixel_z(inst)
+      end
+
+    z =
+      case {dir, others} do
+        {_, []} -> 0
+        {"front", zs} -> Enum.max(zs) + 1
+        {"back", zs} -> Enum.min(zs) - 1
+      end
+
+    update_item(dashboard, instance_id, &Layout.put_pixel(&1, %{"z" => z}))
+  end
+
+  defp pixel_z(inst) do
+    case Layout.pixel(inst)["z"] do
+      z when is_integer(z) -> z
+      _ -> 0
+    end
   end
 
   @doc "Remove a widget instance by its instance id."

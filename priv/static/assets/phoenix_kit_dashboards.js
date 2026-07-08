@@ -100,7 +100,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var rect = card.getBoundingClientRect();
       this.card = card;
       this.pointerId = e.pointerId;
-      // Screen px per CSS px (free mode has a `zoom` on an ancestor; 1 otherwise).
+      // Screen px per CSS px (the fit-scale transform on the canvas; 1 otherwise).
       this.zoom = card.offsetWidth ? rect.width / card.offsetWidth : 1;
       // The card is absolutely positioned inside the canvas; offsetLeft/Top ARE
       // its fx/fy. Drag updates left/top directly — pixel-precise, never snapped.
@@ -108,17 +108,30 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       this.startTop = card.offsetTop;
       this.startClientX = e.clientX;
       this.startClientY = e.clientY;
+      // Pane scroll compensation: edge auto-scroll (or a wheel) moves the canvas
+      // under the stationary pointer, so the scroll delta is part of the drag
+      // delta (in screen px, like the client coords).
+      this.pane = document.getElementById("dashboard-free-fit");
+      this.startScrollTop = this.pane ? this.pane.scrollTop : 0;
+      this.startScrollLeft = this.pane ? this.pane.scrollLeft : 0;
 
       card.style.zIndex = "50";
       card.style.opacity = "0.85";
       card.style.transition = "none";
 
+      this.edge = makeEdgeScroller(
+        function () {
+          return self.pane;
+        },
+        function (ev) {
+          if (ev) self.applyMove(ev);
+        }
+      );
+
       this._onMove = function (ev) {
         if (ev.pointerId !== self.pointerId) return;
-        var dx = (ev.clientX - self.startClientX) / self.zoom;
-        var dy = (ev.clientY - self.startClientY) / self.zoom;
-        card.style.left = Math.max(0, self.startLeft + dx) + "px";
-        card.style.top = Math.max(0, self.startTop + dy) + "px";
+        self.applyMove(ev);
+        self.edge.update(ev);
       };
       this._onUp = function (ev) {
         if (ev.pointerId !== self.pointerId) return;
@@ -133,15 +146,30 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       document.addEventListener("pointercancel", this._onCancel);
     },
 
+    // Scroll-compensated drag deltas → the card's new canvas-relative position.
+    applyMove(ev) {
+      var d = this.deltas(ev);
+      this.card.style.left = Math.max(0, this.startLeft + d.dx) + "px";
+      this.card.style.top = Math.max(0, this.startTop + d.dy) + "px";
+    },
+
+    deltas(ev) {
+      var sx = this.pane ? this.pane.scrollLeft - this.startScrollLeft : 0;
+      var sy = this.pane ? this.pane.scrollTop - this.startScrollTop : 0;
+      return {
+        dx: (ev.clientX - this.startClientX + sx) / this.zoom,
+        dy: (ev.clientY - this.startClientY + sy) / this.zoom
+      };
+    },
+
     endDrag(e) {
       var card = this.card;
+      var d = this.deltas(e);
       this.stopTracking();
       if (!card) return;
 
-      var dx = (e.clientX - this.startClientX) / this.zoom;
-      var dy = (e.clientY - this.startClientY) / this.zoom;
-      var fx = Math.round(Math.max(0, this.startLeft + dx));
-      var fy = Math.round(Math.max(0, this.startTop + dy));
+      var fx = Math.round(Math.max(0, this.startLeft + d.dx));
+      var fy = Math.round(Math.max(0, this.startTop + d.dy));
 
       // Leave the card exactly where it was dropped (px). The server re-render
       // sets the same left/top, so nothing moves — no snap, no rubber-band.
@@ -171,6 +199,10 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     },
 
     stopTracking() {
+      if (this.edge) {
+        this.edge.stop();
+        this.edge = null;
+      }
       if (this._onMove) document.removeEventListener("pointermove", this._onMove);
       if (this._onUp) document.removeEventListener("pointerup", this._onUp);
       if (this._onCancel) document.removeEventListener("pointercancel", this._onCancel);
@@ -1026,8 +1058,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
   };
 
   // `DashboardFreeFit` — scales the free canvas to FILL the available width
-  // (fit-to-width), times an optional manual `data-zoom` multiplier. Vertical
-  // overflow scrolls. Uses `transform: scale` (not CSS `zoom`) so the drag/resize
+  // (fit-to-width). Vertical overflow scrolls. Uses `transform: scale` (not
+  // CSS `zoom`) so the drag/resize
   // hooks' `rect.width / offsetWidth` still reads the exact scale. A `.pk-free-spacer`
   // sized to the scaled canvas gives the scroll area its extent.
   window.PhoenixKitDashboardsHooks.DashboardFreeFit = {
@@ -1074,14 +1106,13 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var avail = this.el.clientWidth - pad;
       if (avail <= 0) return;
 
-      var manual = parseFloat(this.el.getAttribute("data-zoom")) || 100;
       // The canvas is at least as wide as the container, so an empty / narrow
       // layout sits at natural size (scale 1) instead of pre-shrunk; only a layout
       // that extends past the container width scales down to fit.
       var designW = Math.max(contentW, avail);
       canvas.style.width = designW + "px";
 
-      var scale = (avail / designW) * (manual / 100);
+      var scale = avail / designW;
       canvas.style.transformOrigin = "top left";
       canvas.style.transform = "scale(" + scale + ")";
       // The scaled canvas is position:absolute (out of flow); the spacer carries

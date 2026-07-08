@@ -19,11 +19,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     fine), widgets never overlap. Drag by the grip (`DashboardGridDrag`, cell-
     snapped live preview), resize by the corner (snaps + grows until blocked).
   - **free** — an absolute **pixel canvas**: drag and resize anywhere, exact px,
-    no snapping (widgets may overlap). Uses separate `fx/fy/fw/fh` px keys so the
-    two layouts never disturb each other. The `DashboardFreeFit` hook scales the
-    whole canvas to **fill the available width** (fit-to-width, so the exact layout
-    is preserved on any screen — it just shrinks on a phone); vertical overflow
-    scrolls and `zoom` is an optional manual multiplier on top.
+    no snapping. Widgets may overlap — deliberately, via the per-widget
+    bring-to-front / send-to-back controls (a `z` key in the `pixel` map).
+    Uses separate `fx/fy/fw/fh` px keys so the two layouts never disturb each
+    other. The `DashboardFreeFit` hook scales the whole canvas to **fill the
+    available width** (fit-to-width, so the exact layout is preserved on any
+    screen — it just shrinks on a phone); vertical overflow scrolls.
 
   Widgets with a `refresh_interval` are re-queried by a host-driven `:refresh_tick`
   loop.
@@ -34,9 +35,9 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   it on a grid cell or canvas point; a plain click still adds at the first free
   spot), `DashboardFreeDrag` (free-canvas move via `left/top`) and
   `DashboardResize` (corner grip `.pk-resize-handle` — px in free mode; cell-snap
-  clamped by neighbours in grid). The non-hook fallbacks are the free-canvas
-  arrow nudges (px) and the Settings modal's inputs (px size in free; cell size +
-  Column/Row position in grid), all server-driven. Every layout-tweak handler is
+  clamped by neighbours in grid). The non-hook fallback is the Settings modal's
+  inputs (px size + X/Y position in free; cell size + Column/Row position in
+  grid), all server-driven. Every layout-tweak handler is
   guarded so a hostile/malformed event can't crash or brick the builder.
   """
   use PhoenixKitWeb, :live_view
@@ -60,8 +61,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   # Minimum pixel-canvas widget size (mirrors the context's px clamp).
   @free_min_px 60
-  # px a free-mode arrow-nudge moves a widget (the no-JS move fallback).
-  @free_nudge_px 10
 
   @impl true
   def mount(_params, _session, socket) do
@@ -319,22 +318,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end
   end
 
-  # Free-canvas arrow nudge: shift the widget a few px (the no-JS move fallback).
-  @impl true
-  def handle_event("move_widget", %{"id" => id, "dir" => dir}, socket) do
-    dashboard = socket.assigns.dashboard
-
-    case Enum.find(dashboard.layout, &(&1["id"] == id)) do
-      nil ->
-        {:noreply, socket}
-
-      inst ->
-        {fx, fy, _fw, _fh} = free_geometry(inst)
-        {nx, ny} = nudge_px(fx, fy, dir)
-        apply_layout(socket, Dashboards.place_widget_px(dashboard, id, nx, ny))
-    end
-  end
-
   # Pushed by the DashboardFreeDrag hook after a drag in the free canvas; fx/fy are
   # the absolute px position (no cell snap).
   @impl true
@@ -346,11 +329,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     )
   end
 
+  # Bring a pixel widget above (or below) every other one — overlap on the free
+  # canvas is allowed, z-order makes it deliberate.
   @impl true
-  def handle_event("zoom", %{"dir" => dir}, socket) do
-    delta = if dir == "in", do: 10, else: -10
-    zoom = Dashboard.zoom(socket.assigns.dashboard) + delta
-    apply_layout(socket, Dashboards.set_zoom(socket.assigns.dashboard, zoom))
+  def handle_event("restack_widget", %{"id" => id, "dir" => dir}, socket)
+      when is_binary(id) and dir in ["front", "back"] do
+    apply_layout(socket, Dashboards.restack_widget_px(socket.assigns.dashboard, id, dir))
   end
 
   @impl true
@@ -527,13 +511,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     ]
   end
 
-  # Arrow-nudge → new (fx, fy) px on the free canvas (clamped to the top-left).
-  defp nudge_px(fx, fy, "left"), do: {max(fx - @free_nudge_px, 0), fy}
-  defp nudge_px(fx, fy, "right"), do: {fx + @free_nudge_px, fy}
-  defp nudge_px(fx, fy, "up"), do: {fx, max(fy - @free_nudge_px, 0)}
-  defp nudge_px(fx, fy, "down"), do: {fx, fy + @free_nudge_px}
-  defp nudge_px(fx, fy, _dir), do: {fx, fy}
-
   # Only carry a `:view` into the config update when the form actually submitted
   # one (widgets without declared views render no selector).
   defp maybe_put_view(attrs, nil), do: attrs
@@ -608,6 +585,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # Displayed 1-based; the placement is 0-based cells.
   defp maybe_place(dashboard, id, bp, %{"x" => x, "y" => y}) when x != "" and y != "" do
     Dashboards.place_widget_grid(dashboard, id, bp, to_i(x) - 1, to_i(y) - 1)
+  end
+
+  # Pixel mode: exact-px position from the modal's X/Y inputs (the no-JS/no-drag
+  # fallback, like Column/Row in grid mode).
+  defp maybe_place(dashboard, id, _bp, %{"fx" => fx, "fy" => fy}) when fx != "" and fy != "" do
+    Dashboards.place_widget_px(dashboard, id, to_i(fx), to_i(fy))
   end
 
   defp maybe_place(dashboard, _id, _bp, _params), do: {:ok, dashboard}
@@ -714,7 +697,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     assigns =
       assigns
       |> assign(:mode, mode)
-      |> assign(:zoom, Dashboard.zoom(assigns.dashboard))
       # Grid dashboards stay hidden until the best-fit tier is resolved (no
       # wrong-tier flash — the switcher tab + grid reveal together); pixel has no
       # tier detection, so it's revealed immediately.
@@ -748,7 +730,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       </div>
 
       <div class={["pk-grid-ready flex min-h-0 flex-1 flex-col", not @revealed && "hidden"]}>
-        <.mode_bar mode={@mode} zoom={@zoom} active_bp={@active_bp} dashboard={@dashboard} />
+        <.mode_bar :if={@mode == "grid"} active_bp={@active_bp} dashboard={@dashboard} />
 
         <div
           :if={@dashboard.layout == []}
@@ -765,19 +747,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           active_bp={@active_bp}
           scaled={@scaled}
         />
-        <.free_mode
-          :if={@dashboard.layout != [] and @mode == "free"}
-          dashboard={@dashboard}
-          scope={@scope}
-          zoom={@zoom}
-        />
+        <.free_mode :if={@dashboard.layout != [] and @mode == "free"} dashboard={@dashboard} scope={@scope} />
       </div>
     </div>
     """
   end
 
-  attr(:mode, :string, required: true)
-  attr(:zoom, :integer, required: true)
   attr(:active_bp, :string, required: true)
   attr(:dashboard, :map, required: true)
 
@@ -787,14 +762,9 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       <span class="text-xs font-medium text-base-content/50">
         {Gettext.gettext(PhoenixKitWeb.Gettext, "Layout")}
       </span>
-      <%!-- Pixel: a fixed-type badge. Grid: the breakpoint switcher (type is fixed
-      at creation, so there is no grid/free toggle). --%>
-      <span :if={@mode == "free"} class="badge badge-ghost badge-sm gap-1">
-        <.icon name="hero-arrows-pointing-out" class="w-3.5 h-3.5" />
-        {Gettext.gettext(PhoenixKitWeb.Gettext, "Pixel")}
-      </span>
-
-      <div :if={@mode == "grid"} class="join">
+      <%!-- The breakpoint switcher (grid-only bar — pixel mode has no tiers, so it
+      renders no Layout row at all; type is fixed at creation). --%>
+      <div class="join">
         <button
           :for={bp <- Breakpoints.all()}
           type="button"
@@ -809,7 +779,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       </div>
 
       <button
-        :if={@mode == "grid" and @active_bp != Dashboards.home_bp(@dashboard) and Dashboards.customized?(@dashboard, @active_bp)}
+        :if={@active_bp != Dashboards.home_bp(@dashboard) and Dashboards.customized?(@dashboard, @active_bp)}
         type="button"
         phx-click="reset_bp"
         class="btn btn-ghost btn-xs gap-1"
@@ -819,20 +789,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         {Gettext.gettext(PhoenixKitWeb.Gettext, "Reset")}
       </button>
 
-      <div :if={@mode == "free"} class="ml-auto flex items-center gap-1">
-        <span class="text-xs text-base-content/50">
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "Zoom")}
-        </span>
-        <button type="button" phx-click="zoom" phx-value-dir="out" class="btn btn-ghost btn-xs btn-square">
-          <.icon name="hero-minus" class="w-3 h-3" />
-        </button>
-        <span class="w-10 text-center text-xs tabular-nums">{@zoom}%</span>
-        <button type="button" phx-click="zoom" phx-value-dir="in" class="btn btn-ghost btn-xs btn-square">
-          <.icon name="hero-plus" class="w-3 h-3" />
-        </button>
-      </div>
-
-      <div :if={@mode == "grid"} class="ml-auto flex items-center gap-1">
+      <div class="ml-auto flex items-center gap-1">
         <button
           id="dashboard-fullscreen-btn"
           phx-hook="DashboardFullscreen"
@@ -924,24 +881,34 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     """
   end
 
-  # Free/pixel mode — explicit placement on a fixed 12-col canvas, zoomable +
-  # scrollable so it keeps exact placement on a small screen (pan/zoom to see).
+  # Free/pixel mode — exact-px placement on a scrollable canvas, fit-scaled to
+  # the available width. No Layout bar (pixel has no tiers) — just a floating
+  # fullscreen control over the canvas.
   attr(:dashboard, :map, required: true)
   attr(:scope, :any, required: true)
-  attr(:zoom, :integer, required: true)
 
   defp free_mode(assigns) do
     {cw, ch} = free_canvas_dims(assigns.dashboard.layout)
     assigns = assign(assigns, cw: cw, ch: ch)
 
     ~H"""
-    <div
-      id="dashboard-free-fit"
-      phx-hook="DashboardFreeFit"
-      data-zoom={@zoom}
-      class="flex-1 overflow-auto bg-base-200 p-4"
-      style="scrollbar-gutter: stable;"
-    >
+    <div class="relative flex min-h-0 flex-1 flex-col">
+      <button
+        id="dashboard-fullscreen-btn"
+        phx-hook="DashboardFullscreen"
+        data-target="dashboard-free-fit"
+        type="button"
+        class="btn btn-ghost btn-xs btn-square absolute right-6 top-6 z-10 bg-base-100/80"
+        title={Gettext.gettext(PhoenixKitWeb.Gettext, "Full screen")}
+      >
+        <.icon name="hero-arrows-pointing-out" class="w-3.5 h-3.5" />
+      </button>
+      <div
+        id="dashboard-free-fit"
+        phx-hook="DashboardFreeFit"
+        class="flex-1 overflow-auto bg-base-200 p-4"
+        style="scrollbar-gutter: stable;"
+      >
       <%!-- The spacer carries the scaled dimensions so the area scrolls; the
       canvas is scaled in place (transform) by DashboardFreeFit to fill the width.
       It starts hidden so the pre-fit (unscaled) frame never flashes on load; the
@@ -961,6 +928,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           <.widget_card :for={inst <- @dashboard.layout} inst={inst} scope={@scope} mode="free" />
         </div>
       </div>
+    </div>
     </div>
     """
   end
@@ -1017,7 +985,29 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         </span>
 
         <div class="flex items-center gap-0.5 opacity-40 transition-opacity group-hover/widget:opacity-100">
-          <.move_nudge :if={@mode == "free"} id={@inst["id"]} />
+          <%!-- Pixel widgets may overlap; front/back makes the stacking deliberate. --%>
+          <button
+            :if={@mode == "free"}
+            type="button"
+            phx-click="restack_widget"
+            phx-value-id={@inst["id"]}
+            phx-value-dir="front"
+            class="btn btn-ghost btn-xs btn-square"
+            title={Gettext.gettext(PhoenixKitWeb.Gettext, "Bring to front")}
+          >
+            <.icon name="hero-chevron-double-up" class="w-3.5 h-3.5" />
+          </button>
+          <button
+            :if={@mode == "free"}
+            type="button"
+            phx-click="restack_widget"
+            phx-value-id={@inst["id"]}
+            phx-value-dir="back"
+            class="btn btn-ghost btn-xs btn-square"
+            title={Gettext.gettext(PhoenixKitWeb.Gettext, "Send to back")}
+          >
+            <.icon name="hero-chevron-double-down" class="w-3.5 h-3.5" />
+          </button>
           <button
             type="button"
             phx-click="open_settings"
@@ -1051,27 +1041,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           <path d="M9 5v4H5" fill="none" stroke="currentColor" stroke-width="1.2" />
         </svg>
       </span>
-    </div>
-    """
-  end
-
-  # Arrow-nudge move control (pixel mode).
-  attr(:id, :string, required: true)
-
-  defp move_nudge(assigns) do
-    ~H"""
-    <div class="flex items-center opacity-40 transition-opacity group-hover/widget:opacity-100">
-      <button
-        :for={{dir, icon} <- [{"left", "hero-chevron-left"}, {"up", "hero-chevron-up"}, {"down", "hero-chevron-down"}, {"right", "hero-chevron-right"}]}
-        type="button"
-        phx-click="move_widget"
-        phx-value-id={@id}
-        phx-value-dir={dir}
-        class="btn btn-ghost btn-xs btn-square"
-        title={Gettext.gettext(PhoenixKitWeb.Gettext, "Move") <> " " <> dir}
-      >
-        <.icon name={icon} class="w-3 h-3" />
-      </button>
     </div>
     """
   end
@@ -1163,10 +1132,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   defp grip_title(_mode), do: Gettext.gettext(PhoenixKitWeb.Gettext, "Drag to move")
 
-  # Free/pixel canvas: absolute px placement — no grid, no snap.
+  # Free/pixel canvas: absolute px placement — no grid, no snap. `z` orders
+  # deliberately-overlapping widgets (restack_widget).
   defp free_placement_style(inst) do
     {fx, fy, fw, fh} = free_geometry(inst)
-    "position: absolute; left: #{fx}px; top: #{fy}px; width: #{fw}px; height: #{fh}px;"
+    z = Layout.pixel(inst)["z"] |> to_int(0)
+
+    "position: absolute; left: #{fx}px; top: #{fy}px; width: #{fw}px; height: #{fh}px; z-index: #{z};"
   end
 
   # A widget's free-canvas geometry in px, read from its embedded `pixel` map
@@ -1358,7 +1330,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   defp settings_modal(assigns) do
     widget = Registry.get(assigns.instance["widget_key"])
-    {_fx, _fy, fw, fh} = free_geometry(assigns.instance)
+    {fx, fy, fw, fh} = free_geometry(assigns.instance)
 
     # Show the RESOLVED size for the tier being edited (matches what's on screen, incl.
     # derived tiers) so saving doesn't overwrite a derived size with the default.
@@ -1372,6 +1344,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         free_min_px: @free_min_px,
         fw: fw,
         fh: fh,
+        fx: fx,
+        fy: fy,
         grid_w: grid["w"],
         grid_h: grid["h"],
         # 1-based for the form; the placement stores 0-based cells.
@@ -1399,10 +1373,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           <div :if={@widget}>
             <span class="label-text text-sm">
               {if @free?,
-                do: Gettext.gettext(PhoenixKitWeb.Gettext, "Size (px)"),
+                do: Gettext.gettext(PhoenixKitWeb.Gettext, "Size & position (px)"),
                 else: Gettext.gettext(PhoenixKitWeb.Gettext, "Size")}
             </span>
-            <div :if={@free?} class="flex items-center gap-2">
+            <div :if={@free?} class="grid grid-cols-4 items-end gap-2">
               <.input
                 type="number"
                 name="fw"
@@ -1411,7 +1385,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 max="4000"
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Width")}
               />
-              <span class="mt-6 text-base-content/40">×</span>
               <.input
                 type="number"
                 name="fh"
@@ -1419,6 +1392,20 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 min={@free_min_px}
                 max="4000"
                 label={Gettext.gettext(PhoenixKitWeb.Gettext, "Height")}
+              />
+              <.input
+                type="number"
+                name="fx"
+                value={@fx}
+                min="0"
+                label={Gettext.gettext(PhoenixKitWeb.Gettext, "X")}
+              />
+              <.input
+                type="number"
+                name="fy"
+                value={@fy}
+                min="0"
+                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Y")}
               />
             </div>
             <div :if={!@free?} class="grid grid-cols-4 items-end gap-2">

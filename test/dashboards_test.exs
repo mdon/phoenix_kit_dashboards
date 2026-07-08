@@ -490,10 +490,9 @@ defmodule PhoenixKitDashboards.DashboardsTest do
   describe "layout mode & pixel placement" do
     alias PhoenixKitDashboards.Schemas.Dashboard
 
-    test "defaults to grid mode / 100% zoom" do
+    test "defaults to grid mode" do
       {:ok, dashboard} = Dashboards.create(%{title: "M", scope: "system"})
       assert Dashboard.layout_mode(dashboard) == "grid"
-      assert Dashboard.zoom(dashboard) == 100
     end
 
     test "set_layout_mode switches to free and back; ignores invalid" do
@@ -509,14 +508,35 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert Dashboard.layout_mode(grid) == "grid"
     end
 
-    test "set_zoom clamps to 50–150" do
-      {:ok, d0} = Dashboards.create(%{title: "M", scope: "system"})
+    test "restack_widget_px brings a pixel widget above / below every other" do
+      {:ok, d} = Dashboards.create(%{title: "M", scope: "system"})
+      {:ok, d} = Dashboards.add_widget(d, "core.note")
+      {:ok, d} = Dashboards.add_widget(d, "core.clock")
+      {:ok, d} = Dashboards.add_widget(d, "core.note")
+      [a, b, c] = Enum.map(d.layout, & &1["id"])
 
-      {:ok, d1} = Dashboards.set_zoom(d0, 10)
-      assert Dashboard.zoom(d1) == 50
+      z = fn dash, id ->
+        dash.layout |> Enum.find(&(&1["id"] == id)) |> Layout.pixel() |> Map.get("z")
+      end
 
-      {:ok, d2} = Dashboards.set_zoom(d1, 999)
-      assert Dashboard.zoom(d2) == 150
+      # Front: above every other z; back: below (z survives a later move —
+      # put_pixel merges).
+      {:ok, d} = Dashboards.restack_widget_px(d, a, "front")
+      assert z.(d, a) == 1
+
+      {:ok, d} = Dashboards.restack_widget_px(d, b, "front")
+      assert z.(d, b) == 2
+
+      # Back goes below the OTHERS' minimum (a=1, b=2 → 0); a second back from
+      # there goes negative.
+      {:ok, d} = Dashboards.restack_widget_px(d, c, "back")
+      assert z.(d, c) == 0
+
+      {:ok, d} = Dashboards.restack_widget_px(d, a, "back")
+      assert z.(d, a) == -1
+
+      {:ok, d} = Dashboards.place_widget_px(d, b, 40, 40)
+      assert z.(d, b) == 2
     end
   end
 

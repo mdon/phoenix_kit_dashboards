@@ -154,15 +154,6 @@ defmodule PhoenixKitDashboards.Schemas.Dashboard do
     end
   end
 
-  @doc "The pixel-mode zoom percentage (50–150), defaulting to 100."
-  @spec zoom(t()) :: integer()
-  def zoom(%__MODULE__{config: config}) do
-    case config do
-      %{"zoom" => z} when is_integer(z) and z >= 50 and z <= 150 -> z
-      _ -> 100
-    end
-  end
-
   # A scope must point at its audience — a "personal" dashboard without an owner
   # (or a "role" one without a role) would be visible to nobody, an orphan row
   # that only ever counts against slugs. Reject it at write time instead.
