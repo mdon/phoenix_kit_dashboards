@@ -32,6 +32,7 @@ defmodule PhoenixKitDashboards.Schemas.Dashboard do
   - `"role"`     — `role_uuid` set; visible to members of that role.
   """
   use Ecto.Schema
+  use PhoenixKit.SchemaPrefix
 
   import Ecto.Changeset
 
