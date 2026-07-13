@@ -1376,7 +1376,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         </span>
       </:title>
 
-      <form phx-submit="save_settings" class="flex flex-col gap-3">
+      <form id="widget-settings-form" phx-submit="save_settings" class="flex flex-col gap-3">
           <.select
             :if={@widget && @widget.views != []}
             name="view"
@@ -1490,21 +1490,25 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
             field={field}
             value={Map.get(@instance["settings"] || %{}, field.key)}
           />
-        <%!-- Buttons stay INSIDE the form (a submit in the modal's actions slot
-        would render outside it) --%>
-        <div class="modal-action">
-          <button type="button" phx-click="close_settings" class="btn btn-ghost btn-sm">
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "Cancel")}
-          </button>
-          <button
-            type="submit"
-            phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Saving…")}
-            class="btn btn-primary btn-sm"
-          >
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "Save")}
-          </button>
-        </div>
       </form>
+
+      <%!-- Buttons live in the :actions slot — OUTSIDE the modal's scrollable
+      content area (in-form buttons flush at its bottom edge made daisyUI's
+      .btn:active press-nudge overflow the container and flash its scrollbar).
+      The submit stays associated with the form via the form= attribute. --%>
+      <:actions>
+        <button type="button" phx-click="close_settings" class="btn btn-ghost btn-sm">
+          {Gettext.gettext(PhoenixKitWeb.Gettext, "Cancel")}
+        </button>
+        <button
+          type="submit"
+          form="widget-settings-form"
+          phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Saving…")}
+          class="btn btn-primary btn-sm"
+        >
+          {Gettext.gettext(PhoenixKitWeb.Gettext, "Save")}
+        </button>
+      </:actions>
     </.modal>
     """
   end

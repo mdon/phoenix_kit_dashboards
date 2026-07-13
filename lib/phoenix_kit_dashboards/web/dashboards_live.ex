@@ -269,7 +269,7 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
     <.modal show={true} on_close="close_create" id="dashboard-create-modal">
       <:title>{Gettext.gettext(PhoenixKitWeb.Gettext, "New dashboard")}</:title>
 
-      <form phx-submit="create" class="flex flex-col gap-3">
+      <form id="dashboard-create-form" phx-submit="create" class="flex flex-col gap-3">
           <.input
             type="text"
             name="title"
@@ -318,22 +318,27 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
             options={Enum.map(@roles, &{&1.name, &1.uuid})}
           />
 
-        <%!-- Buttons stay INSIDE the form (a submit in the modal's actions slot
-        would render outside it) --%>
-        <div class="modal-action">
-          <button type="button" phx-click="close_create" class="btn btn-ghost">
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "Cancel")}
-          </button>
-          <button
-            type="submit"
-            phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Creating…")}
-            class="btn btn-primary"
-          >
-            <.icon name="hero-plus" class="w-4 h-4" />
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "Create")}
-          </button>
-        </div>
       </form>
+
+      <%!-- Buttons live in the :actions slot — OUTSIDE the modal's scrollable
+      content area. In-form buttons sat flush at the scrollable div's bottom
+      edge, so daisyUI's .btn:active press-nudge (translate 0 0.5px) overflowed
+      the container and flashed its scrollbar on every click. The submit stays
+      associated with the form via the form= attribute (the roles-modal pattern). --%>
+      <:actions>
+        <button type="button" phx-click="close_create" class="btn btn-ghost">
+          {Gettext.gettext(PhoenixKitWeb.Gettext, "Cancel")}
+        </button>
+        <button
+          type="submit"
+          form="dashboard-create-form"
+          phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Creating…")}
+          class="btn btn-primary"
+        >
+          <.icon name="hero-plus" class="w-4 h-4" />
+          {Gettext.gettext(PhoenixKitWeb.Gettext, "Create")}
+        </button>
+      </:actions>
     </.modal>
     """
   end
