@@ -9,20 +9,6 @@ defmodule PhoenixKitDashboards.Web.Helpers do
   alias PhoenixKit.Users.Roles
 
   @doc """
-  Counter for daisyUI 5.0.x's modal/drawer-open `scrollbar-gutter: stable` (the
-  layered zero-specificity original loses to this unlayered rule). The same
-  rule ships in core's admin layout now — delete this helper once the core pin
-  includes it.
-  """
-  @spec gutter_fix_style() :: Phoenix.HTML.safe()
-  def gutter_fix_style do
-    Phoenix.HTML.raw(
-      "<style>:root:has(.modal-open, .modal[open], .modal:target, .modal-toggle:checked)" <>
-        "{scrollbar-gutter:auto}</style>"
-    )
-  end
-
-  @doc """
   Dynamic translation for catalog DATA (widget names, descriptions, view names,
   settings labels — plain strings from the provider contract). Falls back to
   the input when no translation exists, so provider strings pass through.

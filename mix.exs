@@ -81,7 +81,7 @@ defmodule PhoenixKitDashboards.MixProject do
       # column: type, home tier, customized breakpoints). V133 (1.7.145) created
       # the phoenix_kit_dashboards table; an older 1.7.x would resolve the pin yet
       # lack the `config` column the layout engine reads.
-      pk_dep(:phoenix_kit, "~> 1.7.179"),
+      pk_dep(:phoenix_kit, "~> 1.7.189"),
 
       # LiveView powers the dashboard builder and the widget LiveComponents.
       {:phoenix_live_view, "~> 1.1"},

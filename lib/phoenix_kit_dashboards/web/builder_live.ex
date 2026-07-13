@@ -53,7 +53,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       user_role_uuids: 1,
       scope_label: 1,
       bp_label: 1,
-      gutter_fix_style: 0,
       translate_catalog: 1
     ]
 
@@ -643,14 +642,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     PAGE and pop a window scrollbar — the builder is app-like, its grid/canvas
     panes scroll internally instead. --%>
     <div class="flex h-[calc(100dvh-4rem)] flex-col">
-      <%!-- daisyUI's `:root:has(.modal-open)` sets `scrollbar-gutter: stable` with
-      the page lock, reserving a ~15px gutter on a page with nothing to scroll —
-      the fixed modal backdrop then sizes against the REDUCED containing block and
-      leaves an uncovered strip at the right edge (grey in Chrome, white in
-      Firefox — looks like a phantom scrollbar). This page is viewport-locked, so
-      the gutter is pure artifact: counter it at equal specificity (later in the
-      document wins). --%>
-      {gutter_fix_style()}
       <div class="flex items-center justify-between px-4 py-3 border-b border-base-300">
         <div class="flex items-center gap-3">
           <.link navigate={Paths.index()} class="btn btn-ghost btn-sm">

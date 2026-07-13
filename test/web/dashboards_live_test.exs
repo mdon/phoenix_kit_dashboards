@@ -93,6 +93,34 @@ defmodule PhoenixKitDashboards.Web.DashboardsLiveTest do
     end
   end
 
+  describe "create role-scoped" do
+    test "creates a role dashboard when scope=role (the persona-distribution path)", %{
+      conn: conn
+    } do
+      {conn, _user} = sign_in(conn)
+      role_uuid = Ecto.UUID.generate()
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards")
+      render_click(view, "open_create", %{})
+
+      # Submitted at the event level: the role select only renders when the
+      # host has roles, but the handler path must hold regardless.
+      {:error, {:live_redirect, %{to: to}}} =
+        render_submit(view, "create", %{
+          "title" => "Developer Board",
+          "type" => "grid",
+          "scope" => "role",
+          "role_uuid" => role_uuid
+        })
+
+      "/en/admin/dashboards/" <> uuid = to
+      dashboard = Dashboards.get(uuid)
+      assert dashboard.scope == "role"
+      assert dashboard.role_uuid == role_uuid
+      assert dashboard.owner_user_uuid == nil
+    end
+  end
+
   describe "clone" do
     test "clones a shared dashboard into a personal copy and opens it", %{conn: conn} do
       {conn, user} = sign_in(conn)

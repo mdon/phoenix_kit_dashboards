@@ -19,7 +19,6 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
       actor_opts: 1,
       user_role_uuids: 1,
       scope_label: 1,
-      gutter_fix_style: 0,
       list_roles: 0
     ]
 
@@ -135,10 +134,10 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
   defp scope_attrs(_params, socket),
     do: %{scope: "personal", owner_user_uuid: actor_uuid(socket)}
 
-  # Role-scoped dashboards aren't exposed in the create modal for now — but the
-  # context, visibility rules, and list still support them, so re-enabling is a
-  # one-liner: return `roles != []`.
-  defp offer_role_scope?(_roles), do: false
+  # Role-scoped dashboards: a shared board for everyone holding a role — how an
+  # admin ships a ready-made dashboard to e.g. every developer (the "employee
+  # dashboard" persona). Offered whenever the host has roles to pick from.
+  defp offer_role_scope?(roles), do: roles != []
 
   # View: own personal · any shared/system · role dashboards for the user's roles.
   # Shared with the builder via the context so the two never disagree.
@@ -180,10 +179,6 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
   def render(assigns) do
     ~H"""
     <div class="flex flex-col mx-auto max-w-5xl px-4 py-6 gap-6">
-      <%!-- Counter daisyUI's modal-open scrollbar-gutter reservation — see the
-      builder's comment (the create modal here has the same phantom right-edge
-      strip on pages without a scrollbar). --%>
-      {gutter_fix_style()}
       <div class="flex items-center justify-between">
         <h1 class="text-2xl font-semibold">{Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboards")}</h1>
         <button type="button" phx-click="open_create" class="btn btn-primary btn-sm">
