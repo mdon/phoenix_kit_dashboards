@@ -136,6 +136,18 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
   end
 
   describe "grid (Phoenix-first / cell placement)" do
+    test "an empty grid dashboard still renders the surface and its guides", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+
+      {:ok, view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      # The grid pane renders even with zero widgets (hint floats over it)...
+      assert html =~ ~s(id="dashboard-grid")
+      assert html =~ "Add widgets from the panel"
+      # ...so the Show-grid toggle works on an empty board too.
+      assert render_click(view, "toggle_grid_lines", %{}) =~ "pk-grid-cell"
+    end
+
     test "the Show-grid toggle renders cell guides (off by default)", %{conn: conn} do
       {conn, user} = sign_in(conn)
       dashboard = fixture_dashboard(user.uuid)
@@ -151,7 +163,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
 
       refute render_click(view, "toggle_grid_lines", %{}) =~ "pk-grid-cell"
     end
-
 
     test "renders the server grid with the cell-drag hook, not gridstack", %{conn: conn} do
       {conn, user} = sign_in(conn)

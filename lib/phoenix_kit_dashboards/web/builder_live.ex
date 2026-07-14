@@ -811,8 +811,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           show_grid_lines={@show_grid_lines}
         />
 
+        <%!-- The empty hint only replaces the PIXEL canvas; a grid dashboard
+        always renders its surface (so the Show-grid guides work on an empty
+        board and catalog drag-outs have cells to drop onto) with the hint
+        floating over it. --%>
         <div
-          :if={@dashboard.layout == []}
+          :if={@dashboard.layout == [] and @mode != "grid"}
           class="flex flex-1 flex-col items-center justify-center bg-base-200 text-base-content/40"
         >
           <.icon name="hero-squares-plus" class="w-12 h-12" />
@@ -820,12 +824,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         </div>
 
         <.grid_mode
-          :if={@dashboard.layout != [] and @mode == "grid"}
+          :if={@mode == "grid"}
           dashboard={@dashboard}
           scope={@scope}
           active_bp={@active_bp}
           scaled={@scaled}
           show_grid_lines={@show_grid_lines}
+          empty={@dashboard.layout == []}
         />
         <.free_mode :if={@dashboard.layout != [] and @mode == "free"} dashboard={@dashboard} scope={@scope} />
       </div>
@@ -945,6 +950,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   attr(:active_bp, :string, required: true)
   attr(:scaled, :boolean, required: true)
   attr(:show_grid_lines, :boolean, required: true)
+  attr(:empty, :boolean, default: false)
 
   defp grid_mode(assigns) do
     bp = Breakpoints.get(assigns.active_bp) || Breakpoints.get(Breakpoints.default())
@@ -978,9 +984,20 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         phx-hook="DashboardGridFit"
         data-design-width={@preview_width}
         data-fill={to_string(not @scaled)}
-        class="flex-1 overflow-auto bg-base-200 p-4"
+        class="relative flex-1 overflow-auto bg-base-200 p-4"
         style="scrollbar-gutter: stable;"
       >
+        <%!-- Empty-board hint floats over the surface; pointer-events-none so
+        catalog drops land on the cells underneath. --%>
+        <div
+          :if={@empty}
+          class="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center text-base-content/40"
+        >
+          <.icon name="hero-squares-plus" class="w-12 h-12" />
+          <p class="mt-2">
+            {Gettext.gettext(PhoenixKitWeb.Gettext, "Add widgets from the panel on the right.")}
+          </p>
+        </div>
         {Phoenix.HTML.raw(
           ~s(<noscript><style>.pk-grid-scale-canvas{opacity:1 !important}</style></noscript>)
         )}
@@ -1002,7 +1019,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
               drags and drops pass straight through to the grid container. --%>
               <div
                 :for={{x, y} <- if(@show_grid_lines, do: cell_coords(@cols, @rows), else: [])}
-                class="pk-grid-cell pointer-events-none rounded-lg border border-dashed border-base-content/15"
+                class="pk-grid-cell pointer-events-none rounded-md bg-base-content/[0.04]"
                 style={"grid-column: #{x + 1}; grid-row: #{y + 1};"}
                 aria-hidden="true"
               >
