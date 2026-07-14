@@ -22,6 +22,7 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
       list_roles: 0
     ]
 
+  alias Phoenix.LiveView.JS
   alias PhoenixKitDashboards.Dashboards
   alias PhoenixKitDashboards.Paths
   alias PhoenixKitDashboards.Schemas.Dashboard
@@ -179,15 +180,19 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
   def render(assigns) do
     ~H"""
     <div class="flex flex-col mx-auto max-w-5xl px-4 py-6 gap-6">
-      <div class="flex items-center justify-between">
-        <h1 class="text-2xl font-semibold">{Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboards")}</h1>
-        <button type="button" phx-click="open_create" class="btn btn-primary btn-sm">
+      <%!-- No in-page <h1>: the admin header breadcrumb already shows the page
+      title (@page_title), so the page reclaims the space (workspace canon). --%>
+      <div class="flex items-center justify-end">
+        <%!-- pk:dialog-show opens the kept-in-DOM dialog the same frame as the
+        click; the JS.push keeps the server's show_create in sync so later
+        patches don't flip data-show back to false and close it. --%>
+        <button type="button" phx-click={open_create_js()} class="btn btn-primary btn-sm">
           <.icon name="hero-plus" class="w-4 h-4" />
           {Gettext.gettext(PhoenixKitWeb.Gettext, "Create dashboard")}
         </button>
       </div>
 
-      <.create_modal :if={@show_create} roles={@roles} />
+      <.create_modal show={@show_create} roles={@roles} />
 
       <.empty_state
         :if={@dashboards == []}
@@ -195,7 +200,7 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
         icon="hero-squares-2x2"
         title={Gettext.gettext(PhoenixKitWeb.Gettext, "No dashboards yet.")}
       >
-        <button type="button" phx-click="open_create" class="btn btn-primary btn-sm">
+        <button type="button" phx-click={open_create_js()} class="btn btn-primary btn-sm">
           <.icon name="hero-plus" class="w-4 h-4" />
           {Gettext.gettext(PhoenixKitWeb.Gettext, "Create your first dashboard")}
         </button>
@@ -226,33 +231,36 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
                 )}
               </span>
             </p>
-            <div class="card-actions justify-end mt-2">
+            <%!-- Primary action stays a visible button; secondary actions live
+            in the canonical <.table_row_menu> kebab (staff/entities pattern). --%>
+            <div class="card-actions items-center justify-end mt-2">
               <.link navigate={Paths.builder(dashboard.uuid)} class="btn btn-outline btn-xs">
                 <.icon name="hero-pencil-square" class="w-3 h-3" />
                 {Gettext.gettext(PhoenixKitWeb.Gettext, "Open")}
               </.link>
-              <button
-                type="button"
-                phx-click="clone"
-                phx-value-uuid={dashboard.uuid}
-                phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Cloning…")}
-                class="btn btn-ghost btn-xs"
-                title={Gettext.gettext(PhoenixKitWeb.Gettext, "Make a personal copy")}
+              <.table_row_menu
+                id={"dashboard-menu-#{dashboard.uuid}"}
+                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Actions")}
               >
-                <.icon name="hero-document-duplicate" class="w-3 h-3" />
-                {Gettext.gettext(PhoenixKitWeb.Gettext, "Clone")}
-              </button>
-              <button
-                :if={deletable?(dashboard, @current_user_uuid)}
-                type="button"
-                phx-click="delete"
-                phx-value-uuid={dashboard.uuid}
-                data-confirm={Gettext.gettext(PhoenixKitWeb.Gettext, "Delete this dashboard?")}
-                phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Deleting…")}
-                class="btn btn-ghost btn-xs text-error"
-              >
-                <.icon name="hero-trash" class="w-3 h-3" />
-              </button>
+                <.table_row_menu_button
+                  phx-click="clone"
+                  phx-value-uuid={dashboard.uuid}
+                  phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Cloning…")}
+                  icon="hero-document-duplicate"
+                  label={Gettext.gettext(PhoenixKitWeb.Gettext, "Clone")}
+                />
+                <.table_row_menu_divider :if={deletable?(dashboard, @current_user_uuid)} />
+                <.table_row_menu_button
+                  :if={deletable?(dashboard, @current_user_uuid)}
+                  phx-click="delete"
+                  phx-value-uuid={dashboard.uuid}
+                  data-confirm={Gettext.gettext(PhoenixKitWeb.Gettext, "Delete this dashboard?")}
+                  phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Deleting…")}
+                  icon="hero-trash"
+                  label={Gettext.gettext(PhoenixKitWeb.Gettext, "Delete")}
+                  variant="error"
+                />
+              </.table_row_menu>
             </div>
           </div>
         </div>
@@ -261,12 +269,24 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
     """
   end
 
+  # Instant open: pk:dialog-show makes the PkDialog hook showModal() the
+  # kept-in-DOM dialog client-side in the click's own frame; the push tells
+  # the server (no visible latency — the dialog is already open when the ack
+  # lands and finds data-show already true).
+  defp open_create_js do
+    JS.dispatch("pk:dialog-show", to: "#dashboard-create-modal") |> JS.push("open_create")
+  end
+
   # The "New dashboard" modal — title, layout type (fixed at creation), visibility.
+  # keep_in_dom so the trigger can open it client-side with zero round-trip
+  # (the form is static — nothing in it depends on per-open assigns). A
+  # cancelled draft therefore survives a reopen; that's deliberate.
+  attr(:show, :boolean, required: true)
   attr(:roles, :list, required: true)
 
   defp create_modal(assigns) do
     ~H"""
-    <.modal show={true} on_close="close_create" id="dashboard-create-modal">
+    <.modal show={@show} keep_in_dom={true} on_close="close_create" id="dashboard-create-modal">
       <:title>{Gettext.gettext(PhoenixKitWeb.Gettext, "New dashboard")}</:title>
 
       <form id="dashboard-create-form" phx-submit="create" class="flex flex-col gap-3">

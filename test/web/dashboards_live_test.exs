@@ -14,7 +14,8 @@ defmodule PhoenixKitDashboards.Web.DashboardsLiveTest do
     test "renders the empty state with no dashboards", %{conn: conn} do
       {conn, _user} = sign_in(conn)
       {:ok, _view, html} = live(conn, "/en/admin/dashboards")
-      assert html =~ "Dashboards"
+      # No in-page <h1> — the admin header breadcrumb carries the page title.
+      assert html =~ "Create dashboard"
       assert html =~ "No dashboards yet"
     end
 
@@ -28,19 +29,23 @@ defmodule PhoenixKitDashboards.Web.DashboardsLiveTest do
   end
 
   describe "create" do
-    test "the create form is behind a modal, opened by the Create button", %{conn: conn} do
+    test "the create form is behind a kept-in-DOM modal driven by data-show", %{conn: conn} do
       {conn, _user} = sign_in(conn)
       {:ok, view, html} = live(conn, "/en/admin/dashboards")
 
-      # No inline form — the title input only appears once the modal is opened.
-      refute html =~ ~s(name="title")
-      opened = render_click(view, "open_create", %{})
-      assert opened =~ ~s(name="title")
-      assert opened =~ "New dashboard"
+      # keep_in_dom: the dialog (and its form) is rendered from mount so the
+      # trigger can open it client-side with zero round-trip (pk:dialog-show) —
+      # closed via data-show="false" until opened.
+      assert html =~ ~s(id="dashboard-create-modal")
+      assert html =~ ~s(data-show="false")
+      assert html =~ ~s(name="title")
+      assert html =~ "New dashboard"
 
-      # Backdrop / Cancel closes it again.
-      assert render_click(view, "close_create", %{}) =~ "Dashboards"
-      refute render(view) =~ ~s(name="title")
+      # The server push flips data-show (visibility is the PkDialog hook's job).
+      assert render_click(view, "open_create", %{}) =~ ~s(data-show="true")
+
+      # Backdrop / Cancel flips it back.
+      assert render_click(view, "close_create", %{}) =~ ~s(data-show="false")
     end
 
     test "creates a dashboard and live-redirects to its builder", %{conn: conn} do
