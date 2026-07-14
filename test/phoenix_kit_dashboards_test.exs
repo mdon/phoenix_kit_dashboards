@@ -192,9 +192,10 @@ defmodule PhoenixKitDashboardsTest do
           :prov
         )
 
-      # Per-view min honoured; oversize clamps to the widget max; junk dropped.
+      # Per-view min honoured; oversize clamps to the lattice bound (declared
+      # max_size is ignored on the screenful lattice); junk dropped.
       assert Widget.min_size_for(widget, "big") == %{w: 4, h: 3}
-      assert Widget.min_size_for(widget, "huge") == %{w: 8, h: 4}
+      assert Widget.min_size_for(widget, "huge") == %{w: 99, h: 99}
       # Views without (or with malformed) min fall back to the widget's min.
       assert Widget.min_size_for(widget, "text") == %{w: 2, h: 1}
       assert Widget.min_size_for(widget, "junk") == %{w: 2, h: 1}
@@ -288,26 +289,27 @@ defmodule PhoenixKitDashboardsTest do
           :prov
         )
 
-      # min_w clamped into [1, max_dim], max_w >= min_w and <= the lattice cap
-      # (160), min_h >= 1, default clamped into [min, max] per dimension.
+      # min_w clamped into [1, max_dim]; the max is ALWAYS the lattice bound
+      # (declared max_size ignored); default clamped into [min, max].
       cap = PhoenixKitDashboards.Lattice.max_dim()
       assert widget.min_size == %{w: cap, h: 1}
-      assert widget.max_size == %{w: cap, h: 12}
-      assert widget.default_size == %{w: cap, h: 12}
+      assert widget.max_size == %{w: cap, h: cap}
+      assert widget.default_size == %{w: cap, h: cap}
     end
 
-    test "the width cap is the lattice dimension bound" do
+    test "every widget can span the full lattice — declared max_size is ignored" do
       assert PhoenixKitDashboards.Lattice.max_dim() == 160
 
+      # Providers still shipping old-unit declarations (max 6x2 meant half a
+      # 12-col screen) must not cap lattice resizes at nonsense.
       {:ok, widget} =
         Widget.from_map(
-          %{key: "x", name: "Y", component: DummyComponent, max_size: %{w: 40, h: 16}},
+          %{key: "x", name: "Y", component: DummyComponent, max_size: %{w: 6, h: 2}},
           :prov
         )
 
-      assert widget.max_size.w == 40
+      assert widget.max_size == %{w: 160, h: 160}
 
-      # A provider that declares no max at all can span the full lattice.
       {:ok, unbounded} = Widget.from_map(%{key: "x", name: "Y", component: DummyComponent}, :prov)
       assert unbounded.max_size.w == 160
     end

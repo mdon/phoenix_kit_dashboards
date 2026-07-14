@@ -137,11 +137,14 @@ defmodule PhoenixKitDashboards.Widget do
          true <-
            module?(component, Phoenix.LiveComponent) ||
              {:error, {:not_a_live_component, component}} do
+      # Declared :max_size is deliberately IGNORED: on the screenful lattice
+      # the USER owns the box size and content self-fits, so a provider max
+      # cap serves nobody (it's a relic of the old auto-flow grid).
       {default_size, min_size, max_size} =
         sanitized_sizes(
           normalize_size(map[:default_size], %{w: 16, h: 8}),
           normalize_size(map[:min_size], %{w: 8, h: 4}),
-          normalize_size(map[:max_size], %{w: Lattice.max_dim(), h: Lattice.max_dim()})
+          %{w: Lattice.max_dim(), h: Lattice.max_dim()}
         )
 
       {:ok,
