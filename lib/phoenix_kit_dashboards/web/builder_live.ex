@@ -1038,7 +1038,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           </p>
         </div>
         {Phoenix.HTML.raw(
-          ~s(<noscript><style>.pk-grid-scale-canvas{opacity:1 !important}</style></noscript>)
+          ~s(<noscript><style>#dashboard-grid-fit{display:block !important;overflow:auto !important}.pk-grid-scale-spacer{width:auto !important;height:auto !important}.pk-grid-scale-canvas{opacity:1 !important;position:static !important}</style></noscript>)
         )}
         <%!-- The spacer carries the SCALED dimensions (set by the fit hook) so
         flex centering positions the artboard; the canvas is scaled inside it. --%>

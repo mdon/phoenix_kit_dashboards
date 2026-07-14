@@ -57,11 +57,15 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
      |> assign(:view, assigns[:view] || "detailed")}
   end
 
-  defp parse_items(n) when is_integer(n), do: max(n, 1)
+  # Slot budget bounds: below ~1/40th of the box a row is sub-pixel type
+  # anyway, and an unbounded budget would render that many filler divs.
+  @max_items 40
+
+  defp parse_items(n) when is_integer(n), do: n |> max(1) |> min(@max_items)
 
   defp parse_items(s) when is_binary(s) do
     case Integer.parse(s) do
-      {n, _} when n > 0 -> n
+      {n, _} when n > 0 -> min(n, @max_items)
       _ -> 6
     end
   end

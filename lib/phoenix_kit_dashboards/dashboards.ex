@@ -269,10 +269,11 @@ defmodule PhoenixKitDashboards.Dashboards do
         # that were still packed-at-render.
         dashboard = materialize_grid(dashboard, bp)
         cols = grid_cols(dashboard, bp)
+        rows = grid_rows(dashboard, bp)
         w = min(widget.default_size.w, cols)
-        h = widget.default_size.h
+        h = min(widget.default_size.h, rows)
         x = clamp(x, 0, max(cols - w, 0))
-        y = clamp(y, 0, max(grid_rows(dashboard, bp) - h, 0))
+        y = clamp(y, 0, max(rows - h, 0))
         others = Enum.map(dashboard.layout, &Layout.placement(&1, bp))
 
         if Grid.collides?(x, y, w, h, others) do
@@ -331,9 +332,10 @@ defmodule PhoenixKitDashboards.Dashboards do
     w = widget.default_size.w
     h = widget.default_size.h
     seed_w = min(w, cols)
+    seed_h = min(h, grid_rows(dashboard, home))
 
     occupied = dashboard |> resolve_items(home) |> Enum.map(fn {_i, p} -> p end)
-    {x, y} = Grid.first_free(occupied, seed_w, h, cols) || {0, Grid.below_all(occupied)}
+    {x, y} = Grid.first_free(occupied, seed_w, seed_h, cols) || {0, Grid.below_all(occupied)}
 
     %{
       "id" => UUIDv7.generate(),
@@ -351,7 +353,7 @@ defmodule PhoenixKitDashboards.Dashboards do
           "x" => x,
           "y" => y,
           "w" => seed_w,
-          "h" => h,
+          "h" => seed_h,
           "hidden" => false,
           "pos" => length(dashboard.layout)
         }
@@ -1088,6 +1090,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   # cells in `pos` order. Reading-order output.
   defp resolve_designed(dashboard, bp) do
     cols = grid_cols(dashboard, bp)
+    rows = grid_rows(dashboard, bp)
 
     entries =
       dashboard.layout
@@ -1110,9 +1113,9 @@ defmodule PhoenixKitDashboards.Dashboards do
       |> Enum.sort_by(fn {_item, p} -> p["pos"] end)
       |> Enum.map_reduce(Enum.map(placed, fn {_i, p} -> p end), fn {item, p}, occupied ->
         w = p["w"] |> max(1) |> min(cols)
-        h = max(p["h"], 1)
+        h = p["h"] |> max(1) |> min(rows)
         {x, y} = Grid.first_free(occupied, w, h, cols) || {0, Grid.below_all(occupied)}
-        p2 = Map.merge(p, %{"x" => x, "y" => y, "w" => w})
+        p2 = Map.merge(p, %{"x" => x, "y" => y, "w" => w, "h" => h})
         {{item, p2}, [p2 | occupied]}
       end)
 

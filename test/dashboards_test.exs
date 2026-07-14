@@ -187,6 +187,15 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert {:error, :unknown_widget} = Dashboards.add_widget(dashboard, "nope.missing")
     end
 
+    test "add_widget clamps the seeded span to a tiny layout's dims", %{dashboard: dashboard} do
+      # A 4x4 screenful can't hold the note's 16x8 default — the seed clamps
+      # to the layout so no part of the widget lands past the edges.
+      {:ok, tiny} = Dashboards.set_grid_dims(dashboard, "l1", 4, 4)
+      {:ok, tiny} = Dashboards.add_widget(tiny, "core.note")
+      [instance] = tiny.layout
+      assert %{"x" => 0, "y" => 0, "w" => 4, "h" => 4} = Layout.placement(instance, "l1")
+    end
+
     test "remove_widget drops the instance by id", %{dashboard: dashboard} do
       {:ok, with_widget} = Dashboards.add_widget(dashboard, "core.clock")
       [%{"id" => id}] = with_widget.layout

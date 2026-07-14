@@ -940,7 +940,11 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     // a drop is exactly "place where the preview shows" or a cancel.
     track(ev) {
       var overCatalog = ev.target && ev.target.closest && ev.target.closest("#dashboard-catalog");
-      var pane = this.pane ? this.pane.getBoundingClientRect() : null;
+      // Grid mode targets the (possibly letterboxed) ARTBOARD, not the whole
+      // pane — a drop in the blank letterbox margins must cancel, not clamp
+      // onto the board. Pixel mode keeps the pane (its canvas fills it).
+      var surface = this.grid || this.pane;
+      var pane = surface ? surface.getBoundingClientRect() : null;
       var over =
         pane &&
         !overCatalog &&
@@ -1005,8 +1009,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       el.style.position = "absolute";
       el.style.left = fx + "px";
       el.style.top = fy + "px";
-      el.style.width = this.defW * 120 + "px";
-      el.style.height = this.defH * 140 + "px";
+      el.style.width = this.defW * 25 + "px";
+      el.style.height = this.defH * 25 + "px";
     },
 
     hidePreview() {
