@@ -219,8 +219,13 @@ Column/Row inputs; pixel: modal size + X/Y px inputs).
   (15–30 s) use it. Widgets never subscribe themselves (LiveComponents have no
   process); the host drives refresh.
 - **Scopes + sharing**: dashboards are `personal` / `system` (shared) / `role`.
-  The manage page (`DashboardsLive`) authors all three (role picker from core
-  `Roles.list_roles/0`), **clones** any visible dashboard into a private copy, and
+  **Role-scope creation is HIDDEN in the UI for now** (boss call 2026-07-14 —
+  it was briefly offered in the old create modal): the form page authors
+  personal/system only; the backend keeps full role support (`list_for_user/2`
+  role visibility, handler path), and an already-role-scoped dashboard is
+  grandfathered on its edit page (role picker from core `Roles.list_roles/0`)
+  so a save can't silently convert it. The manage page **clones** any visible
+  dashboard into a private copy, and
   gates delete/visibility via `can_view?`/`can_delete?`; `list_for_user/2` takes
   the user's role uuids so role dashboards surface for their members.
 

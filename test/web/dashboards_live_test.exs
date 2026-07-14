@@ -130,8 +130,9 @@ defmodule PhoenixKitDashboards.Web.DashboardsLiveTest do
 
       {:ok, view, _html} = live(conn, "/en/admin/dashboards/new")
 
-      # Submitted at the event level: the role select only renders when the
-      # host has roles, but the handler path must hold regardless.
+      # Submitted at the event level: role creation is HIDDEN in the UI for
+      # now (no "By role" option on the form page), but the backend handler
+      # path stays supported — existing role dashboards keep working.
       {:error, {:live_redirect, %{to: to}}} =
         render_submit(view, "save", %{
           "title" => "Developer Board",
