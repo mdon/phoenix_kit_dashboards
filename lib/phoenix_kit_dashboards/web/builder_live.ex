@@ -1102,8 +1102,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   end
 
   # Free/pixel mode — exact-px placement on a scrollable canvas, fit-scaled to
-  # the available width. No Layout bar (pixel has no tiers) — just a floating
-  # fullscreen control over the canvas.
+  # the available width. No Layout bar (a pixel canvas has no named layouts).
   attr(:dashboard, :map, required: true)
   attr(:scope, :any, required: true)
 
@@ -1124,19 +1123,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       >
       <%!-- The spacer carries the scaled dimensions so the area scrolls; the
       canvas is scaled in place (transform) by DashboardFreeFit to fill the width.
-      It starts hidden so the pre-fit (unscaled) frame never flashes on load; the
-      hook reveals it once scaled, and the <noscript> keeps it visible without JS. --%>
+      It starts hidden so the pre-fit (unscaled) frame never flashes on load —
+      the fit is one synchronous measure on mount, so there is NO loading
+      state (same as grid mode); the <noscript> keeps it usable without JS. --%>
       {Phoenix.HTML.raw(
-        ~s(<noscript><style>.pk-free-canvas{opacity:1 !important}.pk-free-loading{display:none !important}</style></noscript>)
+        ~s(<noscript><style>.pk-free-canvas{opacity:1 !important}</style></noscript>)
       )}
-      <%!-- Covers the pane until DashboardFreeFit scales + reveals the canvas —
-      without it, a slow load shows a blank pane with nothing happening. --%>
-      <div class="pk-free-loading absolute inset-0 flex flex-col items-center justify-center gap-3 text-base-content/50">
-        <span class="loading loading-spinner loading-lg"></span>
-        <p class="text-sm">
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "Fitting the dashboard to your screen…")}
-        </p>
-      </div>
       <div class="pk-free-spacer relative" style={"width: #{@cw}px; height: #{@ch}px;"}>
         <div
           id="dashboard-free-grid"
@@ -1270,7 +1262,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           </button>
         </div>
       </div>
-      <div class="min-h-0 flex-1 overflow-auto">
+      <div class={[
+        "min-h-0 flex-1",
+        # ONE SCREENFUL, NOTHING SCROLLS: grid content self-fits (or clips) at
+        # its box; only pixel-canvas cards keep scroll as the escape hatch.
+        if(@mode == "grid", do: "overflow-hidden", else: "overflow-auto")
+      ]}>
         <.widget_body inst={@inst} scope={@scope} placement={@placement} />
       </div>
       <span

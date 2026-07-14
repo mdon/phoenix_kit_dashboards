@@ -1140,11 +1140,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       // the scaled dimensions so the container scrolls to fit it.
       spacer.style.width = designW * scale + "px";
       spacer.style.height = designH * scale + "px";
-      // Reveal only once scaled, so the pre-fit (unscaled) frame never flashes;
-      // the loading spinner covered the pane until this moment.
+      // Reveal only once scaled, so the pre-fit (unscaled) frame never flashes.
       canvas.style.opacity = "1";
-      var loading = this.el.querySelector(".pk-free-loading");
-      if (loading) loading.style.display = "none";
     },
   };
 
