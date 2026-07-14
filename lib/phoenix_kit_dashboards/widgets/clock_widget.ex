@@ -104,11 +104,7 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
      |> assign(:zone, zone)
      |> assign(:now, now)
      |> assign(:digits, digits)
-     |> assign(:suffix, suffix)
-     # A single-row instance gets the compact treatment: smaller digits, no
-     # date line, tighter padding — the clock must always FIT its box (the root
-     # clips as the last resort; a clock with a scrollbar is broken).
-     |> assign(:compact, compact?(assigns[:size]))}
+     |> assign(:suffix, suffix)}
   end
 
   # The time as {digits, suffix}: 24h has no suffix; 12h renders "hh:mm:ss"
@@ -119,18 +115,16 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
 
   defp format_time(now, _), do: {Calendar.strftime(now, "%H:%M:%S"), nil}
 
-  defp compact?(%{h: h}) when is_integer(h), do: h < 2
-  defp compact?(_), do: false
-
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="card bg-base-100 h-full overflow-hidden">
-      <div class={[
-        "card-body flex h-full min-h-0 flex-col items-center justify-center text-center",
-        if(@compact, do: "gap-0.5 p-2", else: "gap-1 p-3")
-      ]}>
-        <span :if={@label != ""} class="text-xs uppercase tracking-wide text-base-content/50">
+    <%!-- The body is a size container: type scales with the BOX via cq units,
+    so the clock always exactly fits — drag it bigger and the digits grow,
+    smaller and they shrink. Views are honored verbatim (user-chosen; size
+    never silently switches them). --%>
+    <div class="card bg-base-100 h-full overflow-hidden [container-type:size]">
+      <div class="card-body flex h-full min-h-0 flex-col items-center justify-center gap-[2cqmin] p-[4cqmin] text-center">
+        <span :if={@label != ""} class="text-[7cqmin] uppercase tracking-wide text-base-content/50">
           {@label}
         </span>
 
@@ -138,24 +132,21 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
 
         <span
           :if={@view == "digital"}
-          class={[
-            "rounded-lg bg-base-200 font-mono font-semibold tabular-nums tracking-wider",
-            if(@compact, do: "px-3 py-0.5 text-2xl", else: "px-4 py-2 text-4xl")
-          ]}
+          class="rounded-lg bg-base-200 px-[5cqmin] py-[2cqmin] font-mono font-semibold tabular-nums tracking-wider text-[22cqmin] leading-none"
         >
-          {@digits}<span :if={@suffix} class="ml-1 align-baseline text-sm font-normal">{@suffix}</span>
+          {@digits}<span :if={@suffix} class="ml-1 align-baseline text-[9cqmin] font-normal">{@suffix}</span>
         </span>
 
         <%= if @view not in ["analog", "digital"] do %>
-          <span class="font-mono text-2xl tabular-nums">
-            {@digits}<span :if={@suffix} class="ml-1 text-sm font-normal text-base-content/60">{@suffix}</span>
+          <span class="font-mono text-[18cqmin] leading-none tabular-nums">
+            {@digits}<span :if={@suffix} class="ml-1 text-[8cqmin] font-normal text-base-content/60">{@suffix}</span>
           </span>
-          <span :if={not @compact} class="text-xs text-base-content/50">
+          <span class="text-[7cqmin] text-base-content/50">
             {Calendar.strftime(@now, "%Y-%m-%d")}
           </span>
         <% end %>
 
-        <span :if={@show_tz} class="text-xs text-base-content/50">{@zone}</span>
+        <span :if={@show_tz} class="text-[7cqmin] text-base-content/50">{@zone}</span>
       </div>
     </div>
     """

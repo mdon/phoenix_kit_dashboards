@@ -170,11 +170,11 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert instance["widget_key"] == "core.note"
       # Geometry is embedded: a grid placement (default breakpoint, seeded at the
       # first free cell) + pixel geometry.
-      assert Layout.placement(instance, "desktop") ==
-               %{"x" => 0, "y" => 0, "w" => 4, "h" => 2, "hidden" => false, "pos" => 0}
+      assert Layout.placement(instance, "l1") ==
+               %{"x" => 0, "y" => 0, "w" => 16, "h" => 8, "hidden" => false, "pos" => 0}
 
       assert %{"fw" => fw, "fh" => fh} = Layout.pixel(instance)
-      assert fw == 4 * 120 and fh == 2 * 140
+      assert fw == 16 * 25 and fh == 8 * 25
       assert instance["settings"] == %{"title" => "Note", "body" => ""}
 
       assert_activity_logged("dashboard.widget_added",
@@ -233,18 +233,18 @@ defmodule PhoenixKitDashboards.DashboardsTest do
     end
 
     test "reorders the breakpoint's flow to the given id order", %{dashboard: d, ids: [a, b, c]} do
-      assert {:ok, reordered} = Dashboards.reorder_widgets(d, "desktop", [c, a, b])
-      assert ordered_ids(reordered, "desktop") == [c, a, b]
+      assert {:ok, reordered} = Dashboards.reorder_widgets(d, "l1", [c, a, b])
+      assert ordered_ids(reordered, "l1") == [c, a, b]
     end
 
     test "ignores unknown ids and appends unnamed widgets", %{dashboard: d, ids: [a, b, c]} do
-      assert {:ok, reordered} = Dashboards.reorder_widgets(d, "desktop", [b, "ghost", a])
+      assert {:ok, reordered} = Dashboards.reorder_widgets(d, "l1", [b, "ghost", a])
       # b, a named (ghost dropped); c unnamed → appended after.
-      assert ordered_ids(reordered, "desktop") == [b, a, c]
+      assert ordered_ids(reordered, "l1") == [b, a, c]
     end
 
     test "is not activity-logged (layout tweak)", %{dashboard: d, ids: ids} do
-      {:ok, _} = Dashboards.reorder_widgets(d, "desktop", Enum.reverse(ids))
+      {:ok, _} = Dashboards.reorder_widgets(d, "l1", Enum.reverse(ids))
       refute_activity_logged("dashboard.updated", resource_uuid: d.uuid)
     end
   end
@@ -258,38 +258,39 @@ defmodule PhoenixKitDashboards.DashboardsTest do
     end
 
     test "sets width/height within the widget type's bounds", %{dashboard: dashboard, id: id} do
-      assert {:ok, updated} = Dashboards.resize_widget(dashboard, id, "desktop", 6, 3)
-      assert %{"w" => 6, "h" => 3} = Layout.placement(hd(updated.layout), "desktop")
+      assert {:ok, updated} = Dashboards.resize_widget(dashboard, id, "l1", 24, 12)
+      assert %{"w" => 24, "h" => 12} = Layout.placement(hd(updated.layout), "l1")
     end
 
     test "clamps to the widget min/max AND the breakpoint's columns", %{
       dashboard: dashboard,
       id: id
     } do
-      # core.note: min %{w: 2, h: 1}, default max %{w: 12, h: 8}.
-      assert {:ok, small} = Dashboards.resize_widget(dashboard, id, "desktop", 0, 0)
-      assert %{"w" => 2, "h" => 1} = Layout.placement(hd(small.layout), "desktop")
+      # core.note: min %{w: 8, h: 4}.
+      assert {:ok, small} = Dashboards.resize_widget(dashboard, id, "l1", 0, 0)
+      assert %{"w" => 8, "h" => 4} = Layout.placement(hd(small.layout), "l1")
 
-      # The layout has 12 cols → the span clamps to 12.
-      assert {:ok, big} = Dashboards.resize_widget(dashboard, id, "desktop", 99, 99)
-      assert %{"w" => 12, "h" => 8} = Layout.placement(hd(big.layout), "desktop")
+      # The default layout is a 64×36 screenful → the span clamps to it (a
+      # widget can never resize past the screenful's edges).
+      assert {:ok, big} = Dashboards.resize_widget(dashboard, id, "l1", 999, 999)
+      assert %{"w" => 64, "h" => 36} = Layout.placement(hd(big.layout), "l1")
     end
 
     test "the resize floor follows the instance's selected VIEW (per-view min_size)", %{
       dashboard: dashboard
     } do
-      # An analog clock's floor is 2x2; a normal one's is 2x1.
+      # An analog clock's floor is 8x8; a normal one's is 8x4.
       {:ok, d} = Dashboards.add_widget(dashboard, "core.clock")
       clock = List.last(d.layout)["id"]
       {:ok, d} = Dashboards.configure_widget(d, clock, %{view: "analog"})
 
-      {:ok, tiny} = Dashboards.resize_widget(d, clock, "desktop", 1, 1)
-      placement = Dashboards.resolve_placement(tiny, clock, "desktop")
-      assert %{"w" => 2, "h" => 2} = placement
+      {:ok, tiny} = Dashboards.resize_widget(d, clock, "l1", 1, 1)
+      placement = Dashboards.resolve_placement(tiny, clock, "l1")
+      assert %{"w" => 8, "h" => 8} = placement
 
       {:ok, d} = Dashboards.configure_widget(tiny, clock, %{view: "normal"})
-      {:ok, tiny2} = Dashboards.resize_widget(d, clock, "desktop", 1, 1)
-      assert %{"w" => 2, "h" => 1} = Dashboards.resolve_placement(tiny2, clock, "desktop")
+      {:ok, tiny2} = Dashboards.resize_widget(d, clock, "l1", 1, 1)
+      assert %{"w" => 8, "h" => 4} = Dashboards.resolve_placement(tiny2, clock, "l1")
     end
 
     test "min_override drops the recommended floor to 1x1 for that instance", %{
@@ -300,17 +301,17 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       {:ok, d} = Dashboards.configure_widget(d, clock, %{view: "analog"})
 
       # Recommended floor holds…
-      {:ok, held} = Dashboards.resize_widget(d, clock, "desktop", 1, 1)
-      assert %{"w" => 2, "h" => 2} = Dashboards.resolve_placement(held, clock, "desktop")
+      {:ok, held} = Dashboards.resize_widget(d, clock, "l1", 1, 1)
+      assert %{"w" => 8, "h" => 8} = Dashboards.resolve_placement(held, clock, "l1")
 
       # …until the user opts out; turning it back on restores the floor.
       {:ok, d} = Dashboards.configure_widget(held, clock, %{min_override: true})
-      {:ok, tiny} = Dashboards.resize_widget(d, clock, "desktop", 1, 1)
-      assert %{"w" => 1, "h" => 1} = Dashboards.resolve_placement(tiny, clock, "desktop")
+      {:ok, tiny} = Dashboards.resize_widget(d, clock, "l1", 1, 1)
+      assert %{"w" => 1, "h" => 1} = Dashboards.resolve_placement(tiny, clock, "l1")
 
       {:ok, d} = Dashboards.configure_widget(tiny, clock, %{min_override: false})
-      {:ok, restored} = Dashboards.resize_widget(d, clock, "desktop", 1, 1)
-      assert %{"w" => 2, "h" => 2} = Dashboards.resolve_placement(restored, clock, "desktop")
+      {:ok, restored} = Dashboards.resize_widget(d, clock, "l1", 1, 1)
+      assert %{"w" => 8, "h" => 8} = Dashboards.resolve_placement(restored, clock, "l1")
     end
 
     test "switching to a view with a larger minimum grows the placement where free", %{
@@ -318,44 +319,44 @@ defmodule PhoenixKitDashboards.DashboardsTest do
     } do
       {:ok, d} = Dashboards.add_widget(dashboard, "core.clock")
       clock = List.last(d.layout)["id"]
-      # Shrink to the normal view's floor (3x1 keeps digital legal too).
-      {:ok, d} = Dashboards.resize_widget(d, clock, "desktop", 3, 1)
-      assert %{"h" => 1} = Dashboards.resolve_placement(d, clock, "desktop")
+      # Shrink to the normal view's floor (12x4 keeps digital legal too).
+      {:ok, d} = Dashboards.resize_widget(d, clock, "l1", 12, 4)
+      assert %{"h" => 4} = Dashboards.resolve_placement(d, clock, "l1")
 
-      # Analog needs 2x2 → the switch grows the height in place.
+      # Analog needs 8x8 → the switch grows the height in place.
       {:ok, grown} = Dashboards.configure_widget(d, clock, %{view: "analog"})
-      assert %{"w" => 3, "h" => 2} = Dashboards.resolve_placement(grown, clock, "desktop")
+      assert %{"w" => 12, "h" => 8} = Dashboards.resolve_placement(grown, clock, "l1")
     end
 
     test "view-switch growth is skipped where a neighbour blocks it", %{dashboard: dashboard} do
-      # The setup note sits at (0,0); park the clock beside it on row 0.
+      # The setup note sits at (0,0) 16x8; park the clock beside it on row 0.
       {:ok, d} = Dashboards.add_widget(dashboard, "core.clock")
       clock = List.last(d.layout)["id"]
-      {:ok, d} = Dashboards.place_widget_grid(d, clock, "desktop", 5, 0)
-      {:ok, d} = Dashboards.resize_widget(d, clock, "desktop", 3, 1)
+      {:ok, d} = Dashboards.place_widget_grid(d, clock, "l1", 20, 0)
+      {:ok, d} = Dashboards.resize_widget(d, clock, "l1", 12, 4)
 
-      # A note parked directly below blocks the analog growth into row 1.
+      # A note parked directly below blocks the analog growth into row 4.
       {:ok, d} = Dashboards.add_widget(d, "core.note")
       note = List.last(d.layout)["id"]
-      {:ok, d} = Dashboards.place_widget_grid(d, note, "desktop", 5, 1)
+      {:ok, d} = Dashboards.place_widget_grid(d, note, "l1", 20, 4)
 
       {:ok, kept} = Dashboards.configure_widget(d, clock, %{view: "analog"})
-      # Blocked → keeps 3x1 (the analog face just renders smaller than ideal).
-      assert %{"w" => 3, "h" => 1} = Dashboards.resolve_placement(kept, clock, "desktop")
+      # Blocked → keeps 12x4 (the analog face just renders smaller than ideal).
+      assert %{"w" => 12, "h" => 4} = Dashboards.resolve_placement(kept, clock, "l1")
     end
 
     test "grows until blocked by a neighbouring widget, never onto it", %{
       dashboard: dashboard,
       id: id
     } do
-      # Park a second widget at (6, 0) — growing the first (at 0,0) past 6 wide
-      # would overlap it, so the resize clamps to 6.
+      # Park a second widget at (24, 0) — growing the first (at 0,0) past 24
+      # wide would overlap it, so the resize clamps to 24.
       {:ok, d} = Dashboards.add_widget(dashboard, "core.clock")
       other = List.last(d.layout)["id"]
-      {:ok, d} = Dashboards.place_widget_grid(d, other, "desktop", 6, 0)
+      {:ok, d} = Dashboards.place_widget_grid(d, other, "l1", 24, 0)
 
-      assert {:ok, resized} = Dashboards.resize_widget(d, id, "desktop", 10, 2)
-      assert %{"w" => 6, "h" => 2} = Layout.placement(hd(resized.layout), "desktop")
+      assert {:ok, resized} = Dashboards.resize_widget(d, id, "l1", 40, 8)
+      assert %{"w" => 24, "h" => 8} = Layout.placement(hd(resized.layout), "l1")
     end
   end
 
@@ -372,42 +373,42 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       id: id
     } do
       # Nothing occupies rows 1-4; drop the widget at (5, 4) leaving a hole.
-      assert {:ok, placed} = Dashboards.place_widget_grid(d, id, "desktop", 5, 4)
-      assert %{"x" => 5, "y" => 4} = Layout.placement(hd(placed.layout), "desktop")
+      assert {:ok, placed} = Dashboards.place_widget_grid(d, id, "l1", 5, 4)
+      assert %{"x" => 5, "y" => 4} = Layout.placement(hd(placed.layout), "l1")
 
       # Persisted, not just in the returned struct (force_change regression guard).
       assert %{"x" => 5, "y" => 4} =
-               Layout.placement(hd(Dashboards.get(d.uuid).layout), "desktop")
+               Layout.placement(hd(Dashboards.get(d.uuid).layout), "l1")
 
       # The render path reflects it.
-      assert [{_i, %{"x" => 5, "y" => 4}}] = Dashboards.resolve_items(placed, "desktop")
+      assert [{_i, %{"x" => 5, "y" => 4}}] = Dashboards.resolve_items(placed, "l1")
     end
 
-    test "clamps into the tier's columns and the row cap", %{dashboard: d, id: id} do
-      # 4-wide on desktop (12 cols): x clamps to 8; negative coords go to 0.
-      assert {:ok, placed} = Dashboards.place_widget_grid(d, id, "desktop", 99, -3)
-      assert %{"x" => 8, "y" => 0} = Layout.placement(hd(placed.layout), "desktop")
+    test "clamps into the layout's columns and rows", %{dashboard: d, id: id} do
+      # 16-wide on the 64-col screenful: x clamps to 48; negative coords go to 0.
+      assert {:ok, placed} = Dashboards.place_widget_grid(d, id, "l1", 999, -3)
+      assert %{"x" => 48, "y" => 0} = Layout.placement(hd(placed.layout), "l1")
     end
 
     test "refuses a spot occupied by another widget", %{dashboard: d, id: id} do
       {:ok, d} = Dashboards.add_widget(d, "core.clock")
       other = List.last(d.layout)["id"]
-      {:ok, d} = Dashboards.place_widget_grid(d, other, "desktop", 6, 0)
+      {:ok, d} = Dashboards.place_widget_grid(d, other, "l1", 24, 0)
 
-      # Dropping the note (4 wide) at x=4 would overlap the clock at 6..8.
-      assert {:error, :occupied} = Dashboards.place_widget_grid(d, id, "desktop", 4, 0)
+      # Dropping the note (16 wide) at x=16 would overlap the clock at 24..36.
+      assert {:error, :occupied} = Dashboards.place_widget_grid(d, id, "l1", 16, 0)
       # The clear spot right below works.
-      assert {:ok, _} = Dashboards.place_widget_grid(d, id, "desktop", 4, 2)
+      assert {:ok, _} = Dashboards.place_widget_grid(d, id, "l1", 16, 8)
     end
 
     test "add_widget_at drops a catalog widget at the given cell",
          %{dashboard: d} do
-      assert {:ok, added} = Dashboards.add_widget_at(d, "core.clock", "desktop", 5, 4)
+      assert {:ok, added} = Dashboards.add_widget_at(d, "core.clock", "l1", 20, 16)
 
       clock = List.last(added.layout)
       assert clock["widget_key"] == "core.clock"
-      # core.clock default 3x2, placed exactly where dropped.
-      assert %{"x" => 5, "y" => 4, "w" => 3, "h" => 2} = Layout.placement(clock, "desktop")
+      # core.clock default 12x8, placed exactly where dropped.
+      assert %{"x" => 20, "y" => 16, "w" => 12, "h" => 8} = Layout.placement(clock, "l1")
 
       assert_activity_logged("dashboard.widget_added",
         resource_uuid: d.uuid,
@@ -419,18 +420,18 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       dashboard: d,
       id: id
     } do
-      # The note sits at (0,0) 4x2 — dropping onto it is refused.
-      {:ok, d} = Dashboards.place_widget_grid(d, id, "desktop", 0, 0)
-      assert {:error, :occupied} = Dashboards.add_widget_at(d, "core.clock", "desktop", 1, 0)
+      # The note sits at (0,0) 16x8 — dropping onto it is refused.
+      {:ok, d} = Dashboards.place_widget_grid(d, id, "l1", 0, 0)
+      assert {:error, :occupied} = Dashboards.add_widget_at(d, "core.clock", "l1", 4, 0)
 
-      # A far-out x clamps to the right edge instead of failing.
-      assert {:ok, added} = Dashboards.add_widget_at(d, "core.clock", "desktop", 99, 0)
-      assert %{"x" => 9, "y" => 0} = Layout.placement(List.last(added.layout), "desktop")
+      # A far-out x clamps to the right edge (64 - 12) instead of failing.
+      assert {:ok, added} = Dashboards.add_widget_at(d, "core.clock", "l1", 999, 0)
+      assert %{"x" => 52, "y" => 0} = Layout.placement(List.last(added.layout), "l1")
     end
 
     test "add_widget_at and add_widget_px reject an unknown widget key", %{dashboard: d} do
       assert {:error, :unknown_widget} =
-               Dashboards.add_widget_at(d, "nope.missing", "desktop", 0, 0)
+               Dashboards.add_widget_at(d, "nope.missing", "l1", 0, 0)
 
       assert {:error, :unknown_widget} = Dashboards.add_widget_px(d, "nope.missing", 10, 10)
     end
@@ -450,7 +451,7 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       # in the second it packs at render. Resizing it there to EXACTLY the
       # packed size must still pin + persist (Ecto change/2 vs the pre-mutated
       # struct skipped this write before the force_change fix).
-      {:ok, d, entry} = Dashboards.add_layout(d, "desktop")
+      {:ok, d, entry} = Dashboards.add_layout(d, "l1")
       {:ok, d} = Dashboards.add_widget(d, "core.clock")
       clock = List.last(d.layout)
       refute get_in(clock, ["bp", entry["id"]])
@@ -471,82 +472,89 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       %{dashboard: dashboard}
     end
 
-    test "defaults come from the layout entry", %{dashboard: d} do
-      assert Dashboards.grid_cols(d, "desktop") == 12
-      assert Dashboards.grid_rows(d, "desktop") == 15
-      # Unknown ids fall back to the module defaults.
-      assert Dashboards.grid_cols(d, "ghost") == 12
-      assert Dashboards.grid_rows(d, "ghost") == 15
+    test "defaults come from the layout entry (a 16:9 screenful)", %{dashboard: d} do
+      assert Dashboards.grid_cols(d, "l1") == 64
+      assert Dashboards.grid_rows(d, "l1") == 36
+      # Unknown ids fall back to the default screenful.
+      assert Dashboards.grid_cols(d, "ghost") == 64
+      assert Dashboards.grid_rows(d, "ghost") == 36
     end
 
     test "adding a column/row updates the layout entry and persists", %{dashboard: d} do
-      assert {:ok, d1} = Dashboards.resize_grid(d, "desktop", :cols, 1)
-      assert Dashboards.grid_cols(d1, "desktop") == 13
+      assert {:ok, d1} = Dashboards.resize_grid(d, "l1", :cols, 1)
+      assert Dashboards.grid_cols(d1, "l1") == 65
 
-      assert {:ok, d2} = Dashboards.resize_grid(d1, "desktop", :rows, 1)
-      assert Dashboards.grid_rows(d2, "desktop") == 16
+      assert {:ok, d2} = Dashboards.resize_grid(d1, "l1", :rows, 1)
+      assert Dashboards.grid_rows(d2, "l1") == 37
 
       # Persisted, not just in the returned struct.
       reloaded = Dashboards.get(d.uuid)
-      assert Dashboards.grid_cols(reloaded, "desktop") == 13
-      assert Dashboards.grid_rows(reloaded, "desktop") == 16
+      assert Dashboards.grid_cols(reloaded, "l1") == 65
+      assert Dashboards.grid_rows(reloaded, "l1") == 37
 
       # Unknown layout ids are a no-op.
       assert {:ok, _} = Dashboards.resize_grid(d2, "ghost", :cols, 1)
+
+      # set_grid_dims sets both axes exactly ("Fit this screen": 1920x1080
+      # at 25px cells → 77x43).
+      assert {:ok, d3} = Dashboards.set_grid_dims(d2, "l1", 77, 43)
+      assert Dashboards.grid_cols(d3, "l1") == 77
+      assert Dashboards.grid_rows(d3, "l1") == 43
     end
 
     test "a later per-widget edit keeps the layout's dimensions", %{dashboard: d} do
-      {:ok, d1} = Dashboards.resize_grid(d, "desktop", :cols, 1)
+      {:ok, d1} = Dashboards.resize_grid(d, "l1", :cols, 1)
       [%{"id" => id}] = d1.layout
-      {:ok, d2} = Dashboards.place_widget_grid(d1, id, "desktop", 2, 2)
-      assert Dashboards.grid_cols(d2, "desktop") == 13
+      {:ok, d2} = Dashboards.place_widget_grid(d1, id, "l1", 2, 2)
+      assert Dashboards.grid_cols(d2, "l1") == 65
     end
 
-    test "shrinking under a placed widget is refused; free dims shrink fine", %{dashboard: d} do
+    test "shrinking clamps to the extent widgets occupy (never cuts into one)", %{
+      dashboard: d
+    } do
       [%{"id" => id}] = d.layout
-      # Park the 4x2 note at the right edge of the 12-col desktop grid (x=8).
-      {:ok, d1} = Dashboards.place_widget_grid(d, id, "desktop", 8, 0)
-      assert {:error, :occupied} = Dashboards.resize_grid(d1, "desktop", :cols, -1)
+      # Park the 16x8 note at the right edge of the 64-col screenful (x=48).
+      {:ok, d1} = Dashboards.place_widget_grid(d, id, "l1", 48, 0)
+      # A shrink attempt clamps back to the occupied extent (64), not below.
+      assert {:ok, held} = Dashboards.set_grid_dims(d1, "l1", 40, 36)
+      assert Dashboards.grid_cols(held, "l1") == 64
 
-      # Row 0-1 occupied; shrinking rows from 15 down is fine until 2.
-      assert {:ok, d2} = Dashboards.resize_grid(d1, "desktop", :rows, -1)
-      assert Dashboards.grid_rows(d2, "desktop") == 14
+      # Rows shrink freely down to the widget's extent (8).
+      assert {:ok, d2} = Dashboards.set_grid_dims(held, "l1", 64, 6)
+      assert Dashboards.grid_rows(d2, "l1") == 8
 
-      # Move the widget away and the column shrink goes through.
-      {:ok, d3} = Dashboards.place_widget_grid(d2, id, "desktop", 0, 0)
-      assert {:ok, d4} = Dashboards.resize_grid(d3, "desktop", :cols, -1)
-      assert Dashboards.grid_cols(d4, "desktop") == 11
+      # Move the widget home and the column shrink goes through.
+      {:ok, d3} = Dashboards.place_widget_grid(d2, id, "l1", 0, 0)
+      assert {:ok, d4} = Dashboards.set_grid_dims(d3, "l1", 40, 8)
+      assert Dashboards.grid_cols(d4, "l1") == 40
     end
 
-    test "bounds clamp: cols never exceed 24 or drop below 1", %{dashboard: d} do
-      # Grow to the cap...
-      d_max =
-        Enum.reduce(1..20, d, fn _, acc ->
-          {:ok, acc} = Dashboards.resize_grid(acc, "desktop", :cols, 1)
-          acc
-        end)
-
-      assert Dashboards.grid_cols(d_max, "desktop") == 24
-      # ...and the next + is a no-op, not an error.
-      assert {:ok, same} = Dashboards.resize_grid(d_max, "desktop", :cols, 1)
-      assert Dashboards.grid_cols(same, "desktop") == 24
+    test "bounds clamp: dims stay within the lattice's 4..160", %{dashboard: d} do
+      assert {:ok, d_max} = Dashboards.set_grid_dims(d, "l1", 999, 999)
+      assert Dashboards.grid_cols(d_max, "l1") == 160
+      assert Dashboards.grid_rows(d_max, "l1") == 160
+      # The floor is min_dim (4) — but never below the occupied extent (the
+      # 16x8 note at 0,0 holds 16 cols / 8 rows).
+      assert {:ok, d_min} = Dashboards.set_grid_dims(d_max, "l1", 1, 1)
+      assert Dashboards.grid_cols(d_min, "l1") == 16
+      assert Dashboards.grid_rows(d_min, "l1") == 8
     end
 
     test "placement math honors a widened grid", %{dashboard: d} do
       [%{"id" => id}] = d.layout
-      {:ok, d1} = Dashboards.resize_grid(d, "desktop", :cols, 1)
-      # x=9 with w=4 fits on a 13-col grid (9+4=13) but not the default 12.
-      assert {:ok, placed} = Dashboards.place_widget_grid(d1, id, "desktop", 9, 0)
-      assert %{"x" => 9} = Layout.placement(hd(placed.layout), "desktop")
+      {:ok, d1} = Dashboards.resize_grid(d, "l1", :cols, 1)
+      # x=49 with w=16 fits on a 65-col grid (49+16=65) but not the default 64.
+      assert {:ok, placed} = Dashboards.place_widget_grid(d1, id, "l1", 49, 0)
+      assert %{"x" => 49} = Layout.placement(hd(placed.layout), "l1")
     end
 
     test "deleting a layout removes its dimensions with it", %{dashboard: d} do
-      {:ok, d1, entry} = Dashboards.add_layout(d, "desktop")
+      {:ok, d1, entry} = Dashboards.add_layout(d, "l1")
       {:ok, d2} = Dashboards.resize_grid(d1, entry["id"], :cols, 1)
-      assert Dashboards.grid_cols(d2, entry["id"]) == 13
+      assert Dashboards.grid_cols(d2, entry["id"]) == 65
       {:ok, d3} = Dashboards.delete_layout(d2, entry["id"])
       # Back to the fallback default for the unknown id.
-      assert Dashboards.grid_cols(d3, entry["id"]) == 12
+      assert Dashboards.grid_cols(d3, entry["id"]) == 64
     end
   end
 
@@ -667,11 +675,11 @@ defmodule PhoenixKitDashboards.DashboardsTest do
     end
 
     test "px geometry does not disturb the grid placement", %{dashboard: d, id: id} do
-      grid_before = Layout.placement(hd(d.layout), "desktop")
+      grid_before = Layout.placement(hd(d.layout), "l1")
       {:ok, moved} = Dashboards.place_widget_px(d, id, 200, 100)
       {:ok, sized} = Dashboards.resize_widget_px(moved, id, 300, 200)
       # The pixel writes leave the grid placement untouched.
-      assert Layout.placement(hd(sized.layout), "desktop") == grid_before
+      assert Layout.placement(hd(sized.layout), "l1") == grid_before
     end
   end
 
@@ -702,9 +710,9 @@ defmodule PhoenixKitDashboards.DashboardsTest do
 
       # Hostile [id, id] must not yield two entries with the same id (dedup) or a
       # duplicate LiveComponent id at render.
-      {:ok, reordered} = Dashboards.reorder_widgets(d1, "desktop", [id, id, "ghost"])
+      {:ok, reordered} = Dashboards.reorder_widgets(d1, "l1", [id, id, "ghost"])
       assert Enum.map(reordered.layout, & &1["id"]) == [id]
-      assert ordered_ids(reordered, "desktop") == [id]
+      assert ordered_ids(reordered, "l1") == [id]
     end
 
     test "configure_widget coerces a non-map settings to an empty map" do
@@ -738,50 +746,36 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       {:ok, d0} = Dashboards.create(%{title: "Lay", scope: "system"})
       {:ok, d1} = Dashboards.add_widget(d0, "core.note")
       [%{"id" => id}] = d1.layout
-      {:ok, d2} = Dashboards.resize_widget(d1, id, "desktop", 10, 2)
+      {:ok, d2} = Dashboards.resize_widget(d1, id, "l1", 10, 2)
       %{dashboard: d2, id: id}
     end
 
-    test "a fresh dashboard adapts to a single legacy default layout", %{dashboard: d} do
-      assert [%{"id" => "desktop", "name" => "Desktop", "cols" => 12, "rows" => 15}] =
+    test "a fresh dashboard gets the default 16:9 screenful layout", %{dashboard: d} do
+      assert [%{"id" => "l1", "name" => "Layout 1", "cols" => 64, "rows" => 36}] =
                Dashboards.layouts(d)
 
-      assert Dashboards.first_layout_id(d) == "desktop"
+      assert Dashboards.first_layout_id(d) == "l1"
       assert Dashboards.get_layout(d, "nope") == nil
     end
 
-    test "legacy customized tiers adapt to layouts named after the tier" do
-      {:ok, d} =
-        Dashboards.create(%{
-          title: "Legacy",
-          scope: "system",
-          config: %{"home_bp" => "desktop", "breakpoints" => %{"phone" => %{"state" => "custom"}}}
-        })
-
-      assert [
-               %{"id" => "desktop", "name" => "Desktop", "cols" => 12},
-               %{"id" => "phone", "name" => "Phone", "cols" => 4, "rows" => 36}
-             ] = Dashboards.layouts(d)
-    end
-
     test "add_layout copies the source dims + placements and persists", %{dashboard: d, id: id} do
-      assert {:ok, d2, entry} = Dashboards.add_layout(d, "desktop")
-      assert entry["name"] == "Layout 1"
-      assert entry["cols"] == 12 and entry["rows"] == 15
+      assert {:ok, d2, entry} = Dashboards.add_layout(d, "l1")
+      assert entry["name"] == "Layout 2"
+      assert entry["cols"] == 64 and entry["rows"] == 36
 
       # Seeded: the widget carries the SAME placement under the new layout id.
-      src = Dashboards.resolve_placement(d2, id, "desktop")
+      src = Dashboards.resolve_placement(d2, id, "l1")
       seeded = Dashboards.resolve_placement(d2, id, entry["id"])
       assert Map.take(seeded, ~w(x y w h)) == Map.take(src, ~w(x y w h))
 
       # Persisted (config gains the layouts list, snapshotting the legacy one).
       reloaded = Dashboards.get(d.uuid)
-      assert [%{"id" => "desktop"}, %{"id" => new_id}] = Dashboards.layouts(reloaded)
+      assert [%{"id" => "l1"}, %{"id" => new_id}] = Dashboards.layouts(reloaded)
       assert new_id == entry["id"]
     end
 
     test "rename_layout renames (blank ignored) and persists", %{dashboard: d} do
-      {:ok, d, entry} = Dashboards.add_layout(d, "desktop")
+      {:ok, d, entry} = Dashboards.add_layout(d, "l1")
       {:ok, d} = Dashboards.rename_layout(d, entry["id"], "  Wall TV  ")
       assert Dashboards.get_layout(d, entry["id"])["name"] == "Wall TV"
 
@@ -793,16 +787,16 @@ defmodule PhoenixKitDashboards.DashboardsTest do
 
     test "delete_layout strips per-widget placements; the last layout is protected",
          %{dashboard: d, id: id} do
-      assert {:error, :last_layout} = Dashboards.delete_layout(d, "desktop")
+      assert {:error, :last_layout} = Dashboards.delete_layout(d, "l1")
 
-      {:ok, d, entry} = Dashboards.add_layout(d, "desktop")
+      {:ok, d, entry} = Dashboards.add_layout(d, "l1")
       assert get_in(hd(d.layout), ["bp", entry["id"]])
 
       {:ok, d} = Dashboards.delete_layout(d, entry["id"])
-      assert [%{"id" => "desktop"}] = Dashboards.layouts(d)
+      assert [%{"id" => "l1"}] = Dashboards.layouts(d)
       refute get_in(hd(d.layout), ["bp", entry["id"]])
       # The widget lives on in the remaining layout.
-      assert [{%{"id" => ^id}, _p}] = Dashboards.resolve_items(d, "desktop")
+      assert [{%{"id" => ^id}, _p}] = Dashboards.resolve_items(d, "l1")
 
       # Unknown id is a no-op.
       assert {:ok, _} = Dashboards.delete_layout(d, "ghost")
@@ -811,7 +805,7 @@ defmodule PhoenixKitDashboards.DashboardsTest do
     test "a widget without a stored placement packs first-fit (clamped) at render",
          %{dashboard: d} do
       # Second layout, then a new widget seeded only into the FIRST layout.
-      {:ok, d, entry} = Dashboards.add_layout(d, "desktop")
+      {:ok, d, entry} = Dashboards.add_layout(d, "l1")
       {:ok, d} = Dashboards.add_widget(d, "core.clock")
       clock = List.last(d.layout)
       refute get_in(clock, ["bp", entry["id"]])
@@ -826,11 +820,11 @@ defmodule PhoenixKitDashboards.DashboardsTest do
     end
 
     test "hide_widget hides on one layout only", %{dashboard: d, id: id} do
-      {:ok, d, entry} = Dashboards.add_layout(d, "desktop")
+      {:ok, d, entry} = Dashboards.add_layout(d, "l1")
       {:ok, d} = Dashboards.hide_widget(d, id, entry["id"], true)
 
       assert Dashboards.resolve_hidden?(d, id, entry["id"])
-      refute Dashboards.resolve_hidden?(d, id, "desktop")
+      refute Dashboards.resolve_hidden?(d, id, "l1")
       # Runtime filters hidden; builder (default) keeps them.
       assert Dashboards.resolve_items(d, entry["id"], visible: true) == []
       assert length(Dashboards.resolve_items(d, entry["id"])) == 1

@@ -5,14 +5,17 @@ Customizable dashboards for [PhoenixKit](https://github.com/BeamLabEU/phoenix_ki
 Compose dashboard pages from **widgets** contributed by any PhoenixKit module.
 A widget is a self-contained `Phoenix.LiveComponent`; a grid dashboard is an
 ordered set of **user-defined layouts** (e.g. "Desktop", "Wall TV",
-"Portrait door screen") — each just a named `cols × rows` grid with its own
-widget placements, managed from a tab strip in the builder (add copies the
-active layout; rename/delete inline). Widgets anchor at explicit cells (gaps
-allowed, no overlap); the design space uses a constant square cell, and the
-canvas always scales to fill the pane width, so widget contents shrink/grow
-uniformly at any column count. A dashboard opens instantly on its first
-layout — or a specific one via the `?layout=<id>` deep link (handy for wall
-displays). A second dashboard type is a **pixel canvas** (exact-px placement,
+"Portrait door screen") — each a named `cols × rows` grid on a 25px square
+cell lattice representing **exactly one screenful** (nothing scrolls),
+managed from a tab strip in the builder (add copies the active layout;
+rename/delete inline; a "Fit screen" button sizes a layout to the current
+display). Widgets anchor at explicit cells (gaps allowed, no overlap); the
+canvas scales to the viewing pane — stretching to fill when the shapes
+roughly match, otherwise shown as a centered letterboxed artboard — and
+widget content self-fits via container queries, so a layout designed for a
+wall TV stays intact (just smaller) on a phone. A dashboard opens instantly
+on its first layout — or a specific one via the `?layout=<id>` deep link
+(handy for wall displays). A second dashboard type is a **pixel canvas** (exact-px placement,
 deliberate overlap via z-order). The grid is **server-rendered**
 (Phoenix-first — it renders and is operable without JavaScript via the
 settings modal); drag/resize/catalog-drag are progressive enhancement via the

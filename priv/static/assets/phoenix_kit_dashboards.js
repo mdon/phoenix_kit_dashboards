@@ -101,7 +101,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       this.card = card;
       this.pointerId = e.pointerId;
       // Screen px per CSS px (the fit-scale transform on the canvas; 1 otherwise).
-      this.zoom = card.offsetWidth ? rect.width / card.offsetWidth : 1;
+      this.zoomX = card.offsetWidth ? rect.width / card.offsetWidth : 1;
+      this.zoomY = card.offsetHeight ? rect.height / card.offsetHeight : 1;
       // The card is absolutely positioned inside the canvas; offsetLeft/Top ARE
       // its fx/fy. Drag updates left/top directly — pixel-precise, never snapped.
       this.startLeft = card.offsetLeft;
@@ -157,8 +158,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var sx = this.pane ? this.pane.scrollLeft - this.startScrollLeft : 0;
       var sy = this.pane ? this.pane.scrollTop - this.startScrollTop : 0;
       return {
-        dx: (ev.clientX - this.startClientX + sx) / this.zoom,
-        dy: (ev.clientY - this.startClientY + sy) / this.zoom
+        dx: (ev.clientX - this.startClientX + sx) / this.zoomX,
+        dy: (ev.clientY - this.startClientY + sy) / this.zoomY
       };
     },
 
@@ -333,8 +334,10 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var pst = parent ? getComputedStyle(parent) : {};
 
       this.free = card.getAttribute("data-free") === "true";
-      // Screen px per CSS px (accounts for free mode's `zoom`; 1 in grid mode).
-      this.zoom = card.offsetWidth ? rect.width / card.offsetWidth : 1;
+      // Screen px per CSS px, PER AXIS (the screenful fit may stretch the
+      // axes slightly differently within its tolerance).
+      this.zoomX = card.offsetWidth ? rect.width / card.offsetWidth : 1;
+      this.zoomY = card.offsetHeight ? rect.height / card.offsetHeight : 1;
       this.pointerId = e.pointerId;
       this.startX = e.clientX;
       this.startY = e.clientY;
@@ -356,8 +359,17 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         this.maxW = this.intVal("data-max-w", 12);
         this.minH = this.intVal("data-min-h", 1);
         this.maxH = this.intVal("data-max-h", 8);
-        this.gapX = parseFloat(pst.columnGap) || 0;
-        this.gapY = parseFloat(pst.rowGap) || 0;
+        // The lattice is gapless; the card's own margins play the "gap" role
+        // in the span<->px formulas (box = n*stride - gap).
+        var mst = getComputedStyle(card);
+        this.gapX =
+          (parseFloat(pst.columnGap) || 0) +
+          (parseFloat(mst.marginLeft) || 0) +
+          (parseFloat(mst.marginRight) || 0);
+        this.gapY =
+          (parseFloat(pst.rowGap) || 0) +
+          (parseFloat(mst.marginTop) || 0) +
+          (parseFloat(mst.marginBottom) || 0);
         this.strideX = this.startW ? (this.startCssW + this.gapX) / this.startW : this.startCssW || 1;
         this.strideY = this.startH ? (this.startCssH + this.gapY) / this.startH : this.startCssH || 1;
         this.minPxW = this.spanPx(this.minW, this.strideX, this.gapX);
@@ -391,8 +403,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
       this._onMove = function (ev) {
         if (ev.pointerId !== self.pointerId) return;
-        var dxCss = (ev.clientX - self.startX) / self.zoom;
-        var dyCss = (ev.clientY - self.startY) / self.zoom;
+        var dxCss = (ev.clientX - self.startX) / self.zoomX;
+        var dyCss = (ev.clientY - self.startY) / self.zoomY;
         var wpx = Math.max(self.minPxW, Math.min(self.maxPxW, self.startCssW + dxCss));
         var hpx = Math.max(self.minPxH, Math.min(self.maxPxH, self.startCssH + dyCss));
         card.style.width = wpx + "px";
@@ -417,8 +429,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var card = this.el;
       this.stopTracking();
 
-      var dxCss = (e.clientX - this.startX) / this.zoom;
-      var dyCss = (e.clientY - this.startY) / this.zoom;
+      var dxCss = (e.clientX - this.startX) / this.zoomX;
+      var dyCss = (e.clientY - this.startY) / this.zoomY;
       var pxW = Math.round(Math.max(this.minPxW, Math.min(this.maxPxW, this.startCssW + dxCss)));
       var pxH = Math.round(Math.max(this.minPxH, Math.min(this.maxPxH, this.startCssH + dyCss)));
 
@@ -542,22 +554,20 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       return isNaN(v) ? fallback : v;
     },
 
-    // Per-cell stride + scale from the live grid, so cell math holds at any
-    // fit-zoom and column count.
+    // Per-cell stride + per-axis scale from the live grid, so cell math holds
+    // at any fit-scale and lattice size. The lattice is GAPLESS with explicit
+    // template rows — strides come straight from the grid's dimensions.
     metrics() {
-      var cs = getComputedStyle(this.el);
-      var cols = this.intVal(this.el, "data-cols", 12);
-      var gapX = parseFloat(cs.columnGap) || 0;
-      var gapY = parseFloat(cs.rowGap) || 0;
-      var rowH = parseFloat(cs.gridAutoRows) || 128;
-      var colW = (this.el.offsetWidth - (cols - 1) * gapX) / cols;
+      var cols = this.intVal(this.el, "data-cols", 64);
+      var rows = this.intVal(this.el, "data-max-rows", 36);
       var rect = this.el.getBoundingClientRect();
       return {
         cols: cols,
-        maxRows: this.intVal(this.el, "data-max-rows", 50),
-        strideX: colW + gapX,
-        strideY: rowH + gapY,
-        scale: this.el.offsetWidth ? rect.width / this.el.offsetWidth : 1
+        maxRows: rows,
+        strideX: this.el.offsetWidth / cols,
+        strideY: this.el.offsetHeight / rows,
+        scaleX: this.el.offsetWidth ? rect.width / this.el.offsetWidth : 1,
+        scaleY: this.el.offsetHeight ? rect.height / this.el.offsetHeight : 1
       };
     },
 
@@ -682,8 +692,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     track() {
       var gridRect = this.el.getBoundingClientRect();
       var cloneRect = this.clone.getBoundingClientRect();
-      var cssLeft = (cloneRect.left - gridRect.left) / this.m.scale;
-      var cssTop = (cloneRect.top - gridRect.top) / this.m.scale;
+      var cssLeft = (cloneRect.left - gridRect.left) / this.m.scaleX;
+      var cssTop = (cloneRect.top - gridRect.top) / this.m.scaleY;
 
       var tx = Math.round(cssLeft / this.m.strideX);
       var ty = Math.round(cssTop / this.m.strideY);
@@ -858,19 +868,16 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       this.pane = document.getElementById(this.grid ? "dashboard-grid-fit" : "dashboard-free-fit");
 
       if (this.grid) {
-        var cs = getComputedStyle(this.grid);
-        var cols = parseInt(this.grid.getAttribute("data-cols"), 10) || 12;
-        var gapX = parseFloat(cs.columnGap) || 0;
-        var gapY = parseFloat(cs.rowGap) || 0;
-        var rowH = parseFloat(cs.gridAutoRows) || 128;
-        var colW = (this.grid.offsetWidth - (cols - 1) * gapX) / cols;
+        var cols = parseInt(this.grid.getAttribute("data-cols"), 10) || 64;
+        var rows = parseInt(this.grid.getAttribute("data-max-rows"), 10) || 36;
         var rect0 = this.grid.getBoundingClientRect();
         this.m = {
           cols: cols,
-          maxRows: parseInt(this.grid.getAttribute("data-max-rows"), 10) || 50,
-          strideX: colW + gapX,
-          strideY: rowH + gapY,
-          scale: this.grid.offsetWidth ? rect0.width / this.grid.offsetWidth : 1
+          maxRows: rows,
+          strideX: this.grid.offsetWidth / cols,
+          strideY: this.grid.offsetHeight / rows,
+          scaleX: this.grid.offsetWidth ? rect0.width / this.grid.offsetWidth : 1,
+          scaleY: this.grid.offsetHeight ? rect0.height / this.grid.offsetHeight : 1
         };
         this.w = Math.min(this.defW, cols);
         this.h = this.defH;
@@ -950,8 +957,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
       if (this.grid) {
         var rect = this.grid.getBoundingClientRect();
-        var tx = Math.floor((ev.clientX - rect.left) / this.m.scale / this.m.strideX);
-        var ty = Math.floor((ev.clientY - rect.top) / this.m.scale / this.m.strideY);
+        var tx = Math.floor((ev.clientX - rect.left) / this.m.scaleX / this.m.strideX);
+        var ty = Math.floor((ev.clientY - rect.top) / this.m.scaleY / this.m.strideY);
         tx = Math.max(0, Math.min(this.m.cols - this.w, tx));
         ty = Math.max(0, Math.min(this.m.maxRows - this.h, ty));
         if (this.collides(tx, ty)) {
@@ -1164,48 +1171,73 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       window.removeEventListener("resize", this._onResize);
     },
 
+    // ONE SCREENFUL, NEVER SCROLLS. The design canvas (cols*25 x rows*25)
+    // scales into the pane:
+    //  - when the pane's shape roughly matches the layout's (per-axis scales
+    //    within ~10% of each other), scale each axis independently — the
+    //    board fills the pane edge-to-edge, cells go imperceptibly
+    //    non-square, no orphan strip;
+    //  - beyond that tolerance, uniform scale + letterbox: an intact
+    //    artboard, centered (designing a portrait layout on a landscape
+    //    monitor shows a phone-shaped frame — never distortion).
     fit() {
       var canvas = this.el.querySelector(".pk-grid-scale-canvas");
       var spacer = this.el.querySelector(".pk-grid-scale-spacer");
       if (!canvas || !spacer) return;
 
       var designW = parseFloat(this.el.getAttribute("data-design-width")) || canvas.offsetWidth;
-      if (!designW) return;
+      var designH = parseFloat(this.el.getAttribute("data-design-height")) || canvas.offsetHeight;
+      if (!designW || !designH) return;
 
       var cs = getComputedStyle(this.el);
-      var pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
-      var avail = this.el.clientWidth - pad;
-      if (avail <= 0) return;
+      var padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+      var padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      var availW = this.el.clientWidth - padX;
+      var availH = this.el.clientHeight - padY;
+      if (availW <= 0 || availH <= 0) return;
 
-      // The canvas ALWAYS fills the pane width — up or down, every tier,
-      // fullscreen included. On-screen size is purely pane/design ratio; the
-      // design space keeps its constant cell density.
-      var scale = avail / designW;
+      var sx = availW / designW;
+      var sy = availH / designH;
+      var TOLERANCE = 1.10;
 
-      canvas.style.transformOrigin = "top left";
-      canvas.style.transform = "scale(" + scale + ")";
-
-      // The spacer spans the FULL design surface (Grid.max_rows), not just the
-      // occupied rows — so every row is scroll-reachable and a widget can be
-      // placed anywhere up front. Without this, a grid shorter than the pane
-      // has no vertical scrollbar at all and its lower rows are unreachable.
-      var grid = canvas.querySelector("#dashboard-grid");
-      var surfaceH = 0;
-
-      if (grid) {
-        var gcs = getComputedStyle(grid);
-        var rowH = parseFloat(gcs.gridAutoRows) || 89;
-        var rowGap = parseFloat(gcs.rowGap) || 0;
-        var maxRows = parseInt(grid.getAttribute("data-max-rows"), 10) || 50;
-        surfaceH = maxRows * (rowH + rowGap) - rowGap;
+      if (Math.max(sx, sy) / Math.min(sx, sy) > TOLERANCE) {
+        // Mismatched shapes: uniform contain (letterboxed artboard).
+        sx = sy = Math.min(sx, sy);
       }
 
-      // offsetHeight is the UNSCALED layout height (transform doesn't affect it);
-      // the spacer carries the scaled dims so the container scrolls + centers.
-      spacer.style.width = designW * scale + "px";
-      spacer.style.height = Math.max(canvas.offsetHeight, surfaceH) * scale + "px";
+      canvas.style.transformOrigin = "top left";
+      canvas.style.transform = "scale(" + sx + ", " + sy + ")";
+
+      // The spacer carries the scaled dims; the flex-centered pane positions it.
+      spacer.style.width = designW * sx + "px";
+      spacer.style.height = designH * sy + "px";
       canvas.style.opacity = "1";
+
+      // The caption is editor chrome below the board — show it only when the
+      // letterbox leaves room there (stretch mode fills edge-to-edge).
+      var caption = this.el.querySelector(".pk-grid-caption");
+      if (caption) caption.style.display = availH - designH * sy >= 20 ? "" : "none";
     },
+  };
+
+  // `DashboardFitScreen` — the Layout bar's "Fit screen" button: report the
+  // REAL screen pixels (not the pane — the layout should match the display,
+  // which is what fullscreen/kiosk rendering gets) so the server can size the
+  // layout's lattice to this screen.
+  window.PhoenixKitDashboardsHooks.DashboardFitScreen = {
+    mounted() {
+      var self = this;
+      this._onClick = function () {
+        self.pushEvent("fit_screen", {
+          w: window.screen && window.screen.width ? window.screen.width : window.innerWidth,
+          h: window.screen && window.screen.height ? window.screen.height : window.innerHeight
+        });
+      };
+      this.el.addEventListener("click", this._onClick);
+    },
+    destroyed() {
+      this.el.removeEventListener("click", this._onClick);
+    }
   };
 
   // `DashboardFullscreen` — a button that toggles native fullscreen on its

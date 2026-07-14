@@ -13,8 +13,8 @@ defmodule PhoenixKitDashboards.Dashboards do
   require Logger
 
   alias PhoenixKit.RepoHelper
-  alias PhoenixKitDashboards.Breakpoints
   alias PhoenixKitDashboards.Grid
+  alias PhoenixKitDashboards.Lattice
   alias PhoenixKitDashboards.Layout
   alias PhoenixKitDashboards.Registry
   alias PhoenixKitDashboards.Schemas.Dashboard
@@ -24,9 +24,10 @@ defmodule PhoenixKitDashboards.Dashboards do
   @free_min_px 60
   @free_max_px 4000
 
-  # px per grid col/row when seeding a new widget's pixel geometry from its span.
-  @pixel_seed_col 120
-  @pixel_seed_row 140
+  # px per lattice unit when seeding a new widget's pixel-canvas geometry from
+  # its span (the lattice cell is 25px, so the pixel seed mirrors the grid).
+  @pixel_seed_col 25
+  @pixel_seed_row 25
 
   @doc """
   Dashboards visible to a user: their own personal ones, all shared/system ones,
@@ -247,7 +248,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   Add a widget at an explicit grid cell on `bp` (a catalog drag-out drop) —
   `x`/`y` 0-based, clamped into the tier; a spot overlapping another widget is
   refused with `{:error, :occupied}` (the drag hook only offers free cells).
-  Marks the breakpoint customized. Logs `dashboard.widget_added`.
+  Logs `dashboard.widget_added`.
   """
   @spec add_widget_at(
           Dashboard.t(),
@@ -359,10 +360,10 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   @doc """
-  Re-pack a **breakpoint's** grid to `ordered_ids`: every widget gets the first
+  Re-pack a **layout's** grid to `ordered_ids`: every widget gets the first
   free cell in that order (reflow + compact), so the ids' order becomes the
   reading order. Unknown ids are filtered/deduped; unnamed widgets keep their
-  relative order after the named ones. Marks the breakpoint customized. A layout
+  relative order after the named ones. A layout
   tweak — not activity-logged.
   """
   @spec reorder_widgets(Dashboard.t(), String.t(), [String.t()]) ::
@@ -405,9 +406,9 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   @doc """
   Place a grid widget at an explicit cell — `x` (column) / `y` (row), 0-based —
-  on `bp`, marking that breakpoint customized. The widget may go anywhere on the
+  on layout `bp`. The widget may go anywhere on the
   grid (gaps are fine); `x` is clamped so the span stays within the columns, `y`
-  within `Grid.max_rows/0`. A spot overlapping another widget is refused with
+  within the layout's rows. A spot overlapping another widget is refused with
   `{:error, :occupied}` (the drag hook never offers one; this guards stale/
   crafted events). A layout tweak — not activity-logged.
   """
@@ -458,7 +459,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   @doc """
-  Set a grid widget's `w`/`h` span for `bp`, marking that breakpoint customized.
+  Set a grid widget's `w`/`h` span on layout `bp`.
   Clamped to the widget type's min/max — and to what actually FITS at the
   widget's cell: it grows until blocked by a neighbouring widget or the grid
   edge (`Grid.fit_size/8`), never onto another widget. A layout tweak — not
@@ -481,22 +482,24 @@ defmodule PhoenixKitDashboards.Dashboards do
       |> Enum.reject(&(&1["id"] == instance_id))
       |> Enum.map(&Layout.placement(&1, bp))
 
+    rows = grid_rows(dashboard, bp)
+
     layout =
       Enum.map(dashboard.layout, fn
-        %{"id" => ^instance_id} = inst -> resize_instance(inst, bp, w, h, others, cols)
+        %{"id" => ^instance_id} = inst -> resize_instance(inst, bp, w, h, others, cols, rows)
         inst -> inst
       end)
 
     save_pinned(dashboard, layout)
   end
 
-  defp resize_instance(inst, bp, w, h, others, cols) do
+  defp resize_instance(inst, bp, w, h, others, cols, rows) do
     bounds = size_bounds(inst)
     placement = Layout.placement(inst, bp)
 
     case {placement["x"], placement["y"]} do
       {x, y} when is_integer(x) and is_integer(y) ->
-        {w2, h2} = Grid.fit_size(x, y, w, h, placement["h"], others, cols, bounds)
+        {w2, h2} = Grid.fit_size(x, y, w, h, placement["h"], others, {cols, rows}, bounds)
 
         # fit_size floors at the view's min — when even that floor doesn't fit
         # (a raised per-view minimum in a tight corner), keep the current size
@@ -521,7 +524,7 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   @doc """
   Show/hide a grid widget on `bp` (so smaller screens can drop non-essentials),
-  marking that breakpoint customized. A layout tweak — not activity-logged.
+  A layout tweak — not activity-logged.
   """
   @spec hide_widget(Dashboard.t(), instance_id :: String.t(), String.t(), boolean()) ::
           {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
@@ -541,30 +544,26 @@ defmodule PhoenixKitDashboards.Dashboards do
   # ── Grid layouts (user-defined named grids) ────────────────────────
   #
   # A grid dashboard is composed of an ordered list of LAYOUTS stored in
-  # config["layouts"] = [%{"id","name","cols","rows"}]. Widgets are
-  # dashboard-level; each widget's geometry is embedded per layout id
-  # (item["bp"][layout_id]). A layout without a stored placement for a widget
-  # packs it first-fit at render (pinned on first edit) — the same behavior
-  # legacy order-only data always had.
-  #
-  # LEGACY: dashboards from the device-tier era (config["breakpoints"] +
-  # "home_bp") are adapted IN MEMORY — each designed tier becomes a layout
-  # whose id IS the old tier key, so per-widget geometry needs no rewriting.
-  # The adapted list is persisted on the first layout-list mutation.
+  # config["layouts"] = [%{"id","name","cols","rows"}] — each is EXACTLY ONE
+  # SCREENFUL on the gapless 25px lattice (see `PhoenixKitDashboards.Lattice`).
+  # Widgets are dashboard-level; each widget's geometry is embedded per layout
+  # id (item["bp"][layout_id]). A layout without a stored placement for a
+  # widget packs it first-fit at render (pinned on first edit).
 
-  @default_layout_cols 12
-  @default_layout_rows 15
+  # Every dashboard starts with this deterministic default (16:9 screenful:
+  # 64×36 cells = 1600×900 design px). The literal id matters: the entry is
+  # synthesized in memory until the first layout mutation persists the list.
+  @default_layout %{"id" => "l1", "name" => "Layout 1", "cols" => 64, "rows" => 36}
 
   @doc """
-  The dashboard's grid layouts, ordered. Falls back to adapting legacy
-  device-tier data (designed tiers become layouts named after the tier, id =
-  the old tier key), and to a single default "Layout 1" for a fresh dashboard.
+  The dashboard's grid layouts, ordered. A dashboard that has never persisted
+  a layout list gets the default single "Layout 1" (64×36).
   """
   @spec layouts(Dashboard.t()) :: [map()]
   def layouts(%Dashboard{} = dashboard) do
     case dashboard.config do
       %{"layouts" => [_ | _] = entries} -> Enum.map(entries, &normalize_entry/1)
-      _ -> legacy_layouts(dashboard)
+      _ -> [@default_layout]
     end
   end
 
@@ -572,61 +571,11 @@ defmodule PhoenixKitDashboards.Dashboards do
     %{
       "id" => to_string(id),
       "name" => to_string(entry["name"] || "Layout"),
-      "cols" => clamp(entry["cols"] || @default_layout_cols, 1, Breakpoints.max_grid_cols()),
-      "rows" => clamp(entry["rows"] || @default_layout_rows, 1, Grid.max_rows())
+      "cols" =>
+        clamp(entry["cols"] || @default_layout["cols"], Lattice.min_dim(), Lattice.max_dim()),
+      "rows" =>
+        clamp(entry["rows"] || @default_layout["rows"], Lattice.min_dim(), Lattice.max_dim())
     }
-  end
-
-  # Designed legacy tiers -> layout entries (largest tier first). A dashboard
-  # with no designed tier at all gets its legacy home tier (widgets were
-  # seeded there), so pre-layouts widget data always lands in a layout.
-  defp legacy_layouts(dashboard) do
-    designed =
-      for tier <- Breakpoints.all(), legacy_designed?(dashboard, tier.key) do
-        %{
-          "id" => tier.key,
-          "name" => tier.label,
-          "cols" => legacy_dim(dashboard, tier.key, "cols") || tier.cols,
-          "rows" => legacy_dim(dashboard, tier.key, "rows") || tier.max_rows
-        }
-      end
-
-    case designed do
-      [] ->
-        home = legacy_home(dashboard)
-        tier = Breakpoints.get(home) || %{label: "Layout 1", cols: 12, max_rows: 15}
-
-        [
-          %{
-            "id" => home,
-            "name" => tier.label,
-            "cols" => tier.cols,
-            "rows" => tier.max_rows
-          }
-        ]
-
-      entries ->
-        entries
-    end
-  end
-
-  defp legacy_designed?(dashboard, key) do
-    get_in(dashboard.config, ["breakpoints", key, "state"]) == "custom" or
-      key == legacy_home(dashboard)
-  end
-
-  defp legacy_home(dashboard) do
-    case dashboard.config do
-      %{"home_bp" => bp} when is_binary(bp) -> if Breakpoints.get(bp), do: bp, else: "desktop"
-      _ -> "desktop"
-    end
-  end
-
-  defp legacy_dim(dashboard, key, dim) do
-    case get_in(dashboard.config, ["breakpoints", key, dim]) do
-      n when is_integer(n) and n > 0 -> n
-      _ -> nil
-    end
   end
 
   @doc "One layout entry by id, or nil."
@@ -764,63 +713,61 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   defp drop_layout_entry(inst, _id), do: inst
 
-  @doc "The column count of a layout (defaults when the id is unknown)."
+  @doc "The column count of a layout (default entry's when the id is unknown)."
   @spec grid_cols(Dashboard.t(), String.t()) :: pos_integer()
   def grid_cols(%Dashboard{} = dashboard, layout_id) do
     case get_layout(dashboard, layout_id) do
       %{"cols" => cols} -> cols
-      nil -> @default_layout_cols
+      nil -> @default_layout["cols"]
     end
   end
 
-  @doc "The designable rows of a layout (the pane scrolls vertically)."
+  @doc "The row count of a layout (default entry's when the id is unknown)."
   @spec grid_rows(Dashboard.t(), String.t()) :: pos_integer()
   def grid_rows(%Dashboard{} = dashboard, layout_id) do
     case get_layout(dashboard, layout_id) do
       %{"rows" => rows} -> rows
-      nil -> @default_layout_rows
+      nil -> @default_layout["rows"]
     end
   end
 
   @doc """
-  Grow/shrink a layout's grid by one column or row (the builder's +/- header
-  controls). Shrinking is refused with `{:error, :occupied}` while any widget
-  occupies the column/row being removed — move the widget first. Columns are
-  bounded to `1..#{Breakpoints.max_grid_cols()}`, rows to `1..#{Grid.max_rows()}`
-  (the hard placement bound). A layout tweak — not activity-logged.
+  Set a layout's lattice dimensions (the builder's inputs, steppers, and the
+  "Fit this screen" button). Each axis clamps into
+  `#{Lattice.min_dim()}..#{Lattice.max_dim()}` and never below the extent
+  widgets already occupy (shrinking never cuts into a placed widget — the
+  target is raised to fit instead). A layout tweak — not activity-logged.
   """
-  @spec resize_grid(Dashboard.t(), String.t(), :cols | :rows, integer()) ::
-          {:ok, Dashboard.t()} | {:error, :occupied | Ecto.Changeset.t()}
-  def resize_grid(%Dashboard{} = dashboard, layout_id, dim, delta)
-      when is_binary(layout_id) and dim in [:cols, :rows] and delta in [-1, 1] do
-    {current, hi} =
-      case dim do
-        :cols -> {grid_cols(dashboard, layout_id), Breakpoints.max_grid_cols()}
-        :rows -> {grid_rows(dashboard, layout_id), Grid.max_rows()}
-      end
-
-    target = clamp(current + delta, 1, hi)
-
-    cond do
-      get_layout(dashboard, layout_id) == nil ->
+  @spec set_grid_dims(Dashboard.t(), String.t(), integer(), integer()) ::
+          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+  def set_grid_dims(%Dashboard{} = dashboard, layout_id, cols, rows)
+      when is_binary(layout_id) and is_integer(cols) and is_integer(rows) do
+    case get_layout(dashboard, layout_id) do
+      nil ->
         {:ok, dashboard}
 
-      target == current ->
-        {:ok, dashboard}
-
-      delta < 0 and dim_occupied?(dashboard, layout_id, dim, target) ->
-        {:error, :occupied}
-
-      true ->
+      _entry ->
         # Pin resolved placements first so a dimension change can't reshuffle
         # not-yet-pinned (packed-at-render) widgets.
         dashboard = materialize_grid(dashboard, layout_id)
-        key = if dim == :cols, do: "cols", else: "rows"
+
+        cols =
+          cols
+          |> clamp(Lattice.min_dim(), Lattice.max_dim())
+          |> max(occupied_extent(dashboard, layout_id, :cols))
+
+        rows =
+          rows
+          |> clamp(Lattice.min_dim(), Lattice.max_dim())
+          |> max(occupied_extent(dashboard, layout_id, :rows))
 
         entries =
           Enum.map(layouts(dashboard), fn
-            %{"id" => ^layout_id} = entry -> Map.put(entry, key, target)
-            entry -> entry
+            %{"id" => ^layout_id} = entry ->
+              entry |> Map.put("cols", cols) |> Map.put("rows", rows)
+
+            entry ->
+              entry
           end)
 
         config = Map.put(dashboard.config, "layouts", entries)
@@ -833,25 +780,42 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   @doc """
-  The design-space canvas width for a layout — derived from its column count
-  at a constant cell size (`Breakpoints.design_width/1`).
+  Grow/shrink a layout's grid by `delta` columns or rows (the builder's +/-
+  steppers). Same clamping rules as `set_grid_dims/4`.
   """
-  @spec design_width(Dashboard.t(), String.t()) :: pos_integer()
-  def design_width(%Dashboard{} = dashboard, layout_id) do
-    Breakpoints.design_width(grid_cols(dashboard, layout_id))
+  @spec resize_grid(Dashboard.t(), String.t(), :cols | :rows, integer()) ::
+          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+  def resize_grid(%Dashboard{} = dashboard, layout_id, dim, delta)
+      when is_binary(layout_id) and dim in [:cols, :rows] and is_integer(delta) do
+    cols = grid_cols(dashboard, layout_id) + if(dim == :cols, do: delta, else: 0)
+    rows = grid_rows(dashboard, layout_id) + if(dim == :rows, do: delta, else: 0)
+    set_grid_dims(dashboard, layout_id, cols, rows)
   end
 
-  # Would shrinking to `target` cols/rows cut into any resolved placement?
+  @doc "The design-space canvas width for a layout (gapless lattice)."
+  @spec design_width(Dashboard.t(), String.t()) :: pos_integer()
+  def design_width(%Dashboard{} = dashboard, layout_id) do
+    Lattice.design_width(grid_cols(dashboard, layout_id))
+  end
+
+  @doc "The design-space canvas height for a layout (gapless lattice)."
+  @spec design_height(Dashboard.t(), String.t()) :: pos_integer()
+  def design_height(%Dashboard{} = dashboard, layout_id) do
+    Lattice.design_height(grid_rows(dashboard, layout_id))
+  end
+
+  # The furthest cell (exclusive) widgets occupy on an axis — the shrink floor.
   # (Hidden widgets keep their cells, so they count too.)
-  defp dim_occupied?(dashboard, layout_id, dim, target) do
+  defp occupied_extent(dashboard, layout_id, dim) do
     dashboard
     |> resolve_items(layout_id)
-    |> Enum.any?(fn {_item, p} ->
+    |> Enum.map(fn {_item, p} ->
       case dim do
-        :cols -> is_integer(p["x"]) and p["x"] + (p["w"] || 1) > target
-        :rows -> is_integer(p["y"]) and p["y"] + (p["h"] || 1) > target
+        :cols -> if is_integer(p["x"]), do: p["x"] + (p["w"] || 1), else: 0
+        :rows -> if is_integer(p["y"]), do: p["y"] + (p["h"] || 1), else: 0
       end
     end)
+    |> Enum.max(fn -> 0 end)
   end
 
   @doc """
@@ -1119,7 +1083,7 @@ defmodule PhoenixKitDashboards.Dashboards do
     |> repo().update()
   end
 
-  # A designed breakpoint: stored explicit cells render verbatim; order-only
+  # A designed layout: stored explicit cells render verbatim; order-only
   # placements (pre-cells data, or none at all) pack into the remaining free
   # cells in `pos` order. Reading-order output.
   defp resolve_designed(dashboard, bp) do
@@ -1129,7 +1093,13 @@ defmodule PhoenixKitDashboards.Dashboards do
       dashboard.layout
       |> Enum.with_index()
       |> Enum.map(fn {item, idx} ->
-        {item, Map.put_new(Layout.placement(item, bp), "pos", idx)}
+        placement =
+          item
+          |> Layout.placement(bp)
+          |> Map.put_new("pos", idx)
+          |> default_span(item, bp)
+
+        {item, placement}
       end)
 
     {placed, unplaced} =
@@ -1149,8 +1119,25 @@ defmodule PhoenixKitDashboards.Dashboards do
     Enum.sort_by(placed ++ packed, fn {_item, p} -> {p["y"], p["x"], p["pos"]} end)
   end
 
+  # A widget with no stored span for this layout packs at its TYPE's default
+  # size (layouts are independent — no cross-layout derivation). Layout's own
+  # w/h fallback only ever shows for widgets whose module is uninstalled.
+  defp default_span(placement, item, bp) do
+    stored = get_in(item, ["bp", bp]) || %{}
+
+    case Registry.get(item["widget_key"]) do
+      %Widget{default_size: default} ->
+        placement
+        |> then(&if Map.has_key?(stored, "w"), do: &1, else: Map.put(&1, "w", default.w))
+        |> then(&if Map.has_key?(stored, "h"), do: &1, else: Map.put(&1, "h", default.h))
+
+      nil ->
+        placement
+    end
+  end
+
   # Before ANY grid edit at `bp`, pin every widget's currently-resolved placement
-  # (explicit cells included) into that breakpoint — so editing one widget can't
+  # (explicit cells included) into that layout — so editing one widget can't
   # shift the others (they're anchored where the user sees them), whether the
   # tier was deriving or holds pre-cells order-only data. No-op once every
   # widget has stored cells.
@@ -1208,7 +1195,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   defp size_bounds(item) do
     case Registry.get(item["widget_key"]) do
       %Widget{} = widget -> {instance_min(item, widget), widget.max_size}
-      _ -> {%{w: 1, h: 1}, %{w: Breakpoints.max_grid_cols(), h: 8}}
+      _ -> {%{w: 1, h: 1}, %{w: Lattice.max_dim(), h: Lattice.max_dim()}}
     end
   end
 

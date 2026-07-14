@@ -151,7 +151,7 @@ defmodule PhoenixKitDashboards do
 
   # The grid is server-rendered; the module hooks in this bundle are progressive
   # enhancement on top (DashboardGridDrag / DashboardCatalogDrag / DashboardResize /
-  # DashboardFreeDrag / the fit + breakpoint + fullscreen helpers — see the
+  # DashboardFreeDrag / the fit + fullscreen helpers — see the
   # bundle header and AGENTS.md "The grid"). No `@impl` — older core releases don't declare the
   # `js_sources/0` callback.
   def js_sources do

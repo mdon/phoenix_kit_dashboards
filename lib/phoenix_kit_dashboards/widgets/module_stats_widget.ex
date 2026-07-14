@@ -3,10 +3,10 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
   Built-in "Module stats" widget — renders the `get_config/0` map of any
   discovered PhoenixKit module, selected by its `module_key` setting.
 
-  Demonstrates the widget **view + size** contract: it renders a full key/value
-  table in the `"detailed"` view and a single headline count in `"compact"`, and
-  it falls back to compact automatically when the instance is sized too small for
-  a table (`size.w < 3` or `size.h < 2`). It resolves the module through core's
+  Demonstrates the widget **view** contract: it renders a key/value table in
+  the `"detailed"` view and a single headline count in `"compact"` — the view
+  is user-chosen and honored verbatim at any size (content self-fits via
+  container-query type scaling). It resolves the module through core's
   `PhoenixKit.ModuleRegistry` and degrades gracefully when core isn't loaded or
   the key is unknown. The settings form offers the installed modules as a
   SELECT (`module_options/0`) — nobody should have to know registry keys.
@@ -43,74 +43,98 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
     settings = assigns[:settings] || %{}
     module_key = Map.get(settings, "module_key", "")
     stats = load_stats(module_key)
+    # The user-set row budget: the detailed table shows exactly this many
+    # entries (box divides into slots; nothing scrolls, nothing is silently
+    # cut — the "+N more" line says what's beyond the budget).
+    items = parse_items(Map.get(settings, "items", 6))
 
     {:ok,
      socket
      |> assign(:id, assigns.id)
      |> assign(:module_key, module_key)
      |> assign(:stats, stats)
-     |> assign(:effective_view, effective_view(assigns[:view], assigns[:size], stats))
-     # A single-row instance renders dense so the headline count FITS the
-     # minimum box instead of growing a scrollbar.
-     |> assign(:compact, compact?(assigns[:size]))}
+     |> assign(:items, items)
+     |> assign(:view, assigns[:view] || "detailed")}
   end
+
+  defp parse_items(n) when is_integer(n), do: max(n, 1)
+
+  defp parse_items(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, _} when n > 0 -> n
+      _ -> 6
+    end
+  end
+
+  defp parse_items(_), do: 6
 
   @impl true
   def render(assigns) do
+    shown = Enum.take(Enum.sort_by(assigns.stats, &elem(&1, 0)), assigns.items)
+
+    assigns =
+      assign(assigns,
+        shown: shown,
+        beyond: max(map_size(assigns.stats) - assigns.items, 0),
+        # Empty slots pad the table to the full row budget, so slot height —
+        # and therefore type size — depends only on the "items" setting, not
+        # on how many stats the module happens to expose.
+        filler: max(assigns.items - length(shown), 0)
+      )
+
     ~H"""
-    <div class="card bg-base-100 h-full">
-      <div class={["card-body", if(@compact, do: "gap-0.5 p-2", else: "p-4")]}>
-        <h3 class={["card-title", if(@compact, do: "text-xs", else: "text-sm")]}>
+    <%!-- Views are honored verbatim (user-chosen). "detailed" is the worked
+    example of the N-SLOT pattern: the box divides into the user-set number of
+    row slots (settings "items"), each row's type scales to its slot via cq
+    units — everything always fits, nothing scrolls. "compact" is the worked
+    example of pure cq type scaling (one big count filling the box). --%>
+    <div class="card bg-base-100 h-full overflow-hidden [container-type:size]">
+      <div class="card-body flex h-full min-h-0 flex-col gap-[2cqmin] overflow-hidden p-[4cqmin]">
+        <h3 class="card-title text-[8cqmin] leading-tight">
           {module_label(@module_key)}
         </h3>
 
-        <p :if={@stats == %{}} class="text-sm text-base-content/50">
+        <p :if={@stats == %{}} class="text-[7cqmin] text-base-content/50">
           {Gettext.gettext(
             PhoenixKitWeb.Gettext,
             "No stats — pick a module in this widget's settings."
           )}
         </p>
 
-        <dl
-          :if={@stats != %{} and @effective_view == "detailed"}
-          class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm mt-1"
+        <div
+          :if={@stats != %{} and @view == "detailed"}
+          class="flex min-h-0 flex-1 flex-col"
         >
-          <%= for {key, value} <- @stats do %>
-            <dt class="text-base-content/60">{key}</dt>
-            <dd class="font-mono text-right">{inspect(value)}</dd>
-          <% end %>
-        </dl>
+          <div
+            :for={{key, value} <- @shown}
+            class="flex min-h-0 flex-1 items-center justify-between gap-2 [container-type:size]"
+          >
+            <span class="truncate text-[55cqh] leading-none text-base-content/60">{key}</span>
+            <span class="shrink-0 font-mono text-[55cqh] leading-none">{inspect(value)}</span>
+          </div>
+          <div :for={_pad <- 1..@filler//1} class="min-h-0 flex-1"></div>
+          <div
+            :if={@beyond > 0}
+            class="pt-[1cqmin] text-right text-[5cqmin] leading-none text-base-content/40"
+          >
+            +{@beyond} {Gettext.gettext(PhoenixKitWeb.Gettext, "more")}
+          </div>
+        </div>
 
         <div
-          :if={@stats != %{} and @effective_view == "compact"}
-          class="flex flex-1 flex-col items-center justify-center"
+          :if={@stats != %{} and @view == "compact"}
+          class="flex min-h-0 flex-1 flex-col items-center justify-center"
         >
-          <span class={["font-bold", if(@compact, do: "text-2xl", else: "text-3xl")]}>
+          <span class="font-bold text-[30cqmin] leading-none">
             {map_size(@stats)}
           </span>
-          <span class="text-xs text-base-content/50">
+          <span class="text-[7cqmin] text-base-content/50">
             {Gettext.gettext(PhoenixKitWeb.Gettext, "stats")}
           </span>
         </div>
       </div>
     </div>
     """
-  end
-
-  defp compact?(%{h: h}) when is_integer(h), do: h < 2
-  defp compact?(_), do: false
-
-  # Honor the selected view, but degrade to compact when the widget is too small
-  # for a table (or when a single stat makes a table pointless).
-  defp effective_view(view, size, stats) do
-    too_small? = match?(%{w: w} when w < 3, size) or match?(%{h: h} when h < 2, size)
-
-    cond do
-      view == "compact" -> "compact"
-      too_small? -> "compact"
-      map_size(stats) <= 1 -> "compact"
-      true -> "detailed"
-    end
   end
 
   # The module's human name for the card title (falls back to the raw key for

@@ -7,7 +7,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   The grid is plain HEEx + a CSS grid: each widget instance is anchored at its
   placement's `x`/`y` cells (`grid-column/-row: <line> / span <n>`) on the active
-  breakpoint's column grid. It renders — and is fully readable — **without any
+  layout's lattice. It renders — and is fully readable — **without any
   JavaScript**. The server owns the canonical layout (the JSONB `layout` list);
   every mutation re-renders normally (no `phx-update="ignore"`), so
   adding/removing/moving/resizing a widget is live.
@@ -56,8 +56,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     ]
 
   alias Phoenix.LiveView.JS
-  alias PhoenixKitDashboards.Breakpoints
   alias PhoenixKitDashboards.Dashboards
+  alias PhoenixKitDashboards.Lattice
   alias PhoenixKitDashboards.Layout
   alias PhoenixKitDashboards.Paths
   alias PhoenixKitDashboards.Registry
@@ -287,8 +287,59 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     {:noreply, update(socket, :show_grid_lines, &(!&1))}
   end
 
-  # Grow/shrink the active tier's grid by one column or row (the Layout bar's
-  # +/- controls). Shrinking under a placed widget is refused with a flash.
+  # Exact lattice dimensions from the Layout bar's inputs. Values clamp into
+  # the lattice bounds and never below the extent widgets occupy.
+  @impl true
+  def handle_event("set_dims", %{"cols" => cols, "rows" => rows}, socket) do
+    apply_layout(
+      socket,
+      Dashboards.set_grid_dims(
+        socket.assigns.dashboard,
+        socket.assigns.active_layout,
+        to_i(cols),
+        to_i(rows)
+      )
+    )
+  end
+
+  # "Fit screen": the DashboardFitScreen hook reports the real screen pixels;
+  # the layout becomes that screen's shape on the 25px lattice.
+  @impl true
+  def handle_event("fit_screen", %{"w" => w, "h" => h}, socket) do
+    cell = Lattice.cell()
+
+    apply_layout(
+      socket,
+      Dashboards.set_grid_dims(
+        socket.assigns.dashboard,
+        socket.assigns.active_layout,
+        round(to_i(w) / cell),
+        round(to_i(h) / cell)
+      )
+    )
+  end
+
+  # Cycle a widget instance through its declared views (the hover-toolbar
+  # button) — view modes are user-chosen; size never switches them silently.
+  @impl true
+  def handle_event("cycle_view", %{"id" => instance_id}, socket) when is_binary(instance_id) do
+    dashboard = socket.assigns.dashboard
+
+    with %{} = inst <- Enum.find(dashboard.layout, &(&1["id"] == instance_id)),
+         %Widget{views: [_ | _] = views} <- Registry.get(inst["widget_key"]) do
+      keys = Enum.map(views, & &1.key)
+      current = inst["view"] || hd(keys)
+      next = Enum.at(keys, rem((Enum.find_index(keys, &(&1 == current)) || 0) + 1, length(keys)))
+
+      apply_layout(
+        socket,
+        Dashboards.configure_widget(dashboard, instance_id, %{view: next}, actor_opts(socket))
+      )
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
   @impl true
   def handle_event("grid_dim", %{"dim" => dim, "delta" => delta}, socket) do
     with {:ok, dim} <- Map.fetch(%{"cols" => :cols, "rows" => :rows}, dim),
@@ -335,7 +386,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     )
   end
 
-  # Grid-mode resize (active breakpoint): the card snaps to the nearest cell on
+  # Grid-mode resize (active layout): the card snaps to the nearest cell on
   # release. The context clamps to the widget type's min/max + the bp's columns.
   @impl true
   def handle_event("resize_widget_to", %{"id" => id, "w" => w, "h" => h}, socket)
@@ -879,8 +930,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         </ul>
       </div>
 
-      <%!-- Per-layout grid dimensions. Columns always FIT horizontally (the
-      canvas scales to the pane); extra rows extend downward and scroll. --%>
+      <%!-- Per-layout lattice dimensions — one screenful. Type exact numbers
+      or hit "Fit screen" to match the display you're standing at. --%>
       <div class="ml-auto flex items-center gap-3">
         <label class="flex cursor-pointer items-center gap-1.5">
           <span class="text-xs font-medium text-base-content/50">
@@ -893,50 +944,44 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
             checked={@show_grid_lines}
           />
         </label>
-        <.dim_control
-          label={Gettext.gettext(PhoenixKitWeb.Gettext, "Columns")}
-          dim="cols"
-          value={Dashboards.grid_cols(@dashboard, @active_layout)}
-        />
-        <.dim_control
-          label={Gettext.gettext(PhoenixKitWeb.Gettext, "Rows")}
-          dim="rows"
-          value={Dashboards.grid_rows(@dashboard, @active_layout)}
-        />
-      </div>
-    </div>
-    """
-  end
-
-  attr(:label, :string, required: true)
-  attr(:dim, :string, required: true)
-  attr(:value, :integer, required: true)
-
-  defp dim_control(assigns) do
-    ~H"""
-    <div class="flex items-center gap-1">
-      <span class="text-xs font-medium text-base-content/50">{@label}</span>
-      <div class="join">
+        <form id="grid-dims" phx-change="set_dims" class="flex items-center gap-1">
+          <span class="text-xs font-medium text-base-content/50">
+            {Gettext.gettext(PhoenixKitWeb.Gettext, "Grid")}
+          </span>
+          <input
+            type="number"
+            name="cols"
+            value={Dashboards.grid_cols(@dashboard, @active_layout)}
+            min={Lattice.min_dim()}
+            max={Lattice.max_dim()}
+            class="input input-xs w-14 tabular-nums"
+            aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Columns")}
+          />
+          <span class="text-xs text-base-content/40">×</span>
+          <input
+            type="number"
+            name="rows"
+            value={Dashboards.grid_rows(@dashboard, @active_layout)}
+            min={Lattice.min_dim()}
+            max={Lattice.max_dim()}
+            class="input input-xs w-14 tabular-nums"
+            aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Rows")}
+          />
+        </form>
         <button
+          id="dashboard-fit-screen"
           type="button"
-          phx-click="grid_dim"
-          phx-value-dim={@dim}
-          phx-value-delta="-1"
-          class="join-item btn btn-xs btn-square"
-          title={Gettext.gettext(PhoenixKitWeb.Gettext, "Remove one")}
+          phx-hook="DashboardFitScreen"
+          class="btn btn-ghost btn-xs gap-1"
+          title={
+            Gettext.gettext(
+              PhoenixKitWeb.Gettext,
+              "Size this layout to the screen you're viewing on"
+            )
+          }
         >
-          <.icon name="hero-minus" class="w-3 h-3" />
-        </button>
-        <span class="join-item btn btn-xs pointer-events-none w-8 tabular-nums">{@value}</span>
-        <button
-          type="button"
-          phx-click="grid_dim"
-          phx-value-dim={@dim}
-          phx-value-delta="1"
-          class="join-item btn btn-xs btn-square"
-          title={Gettext.gettext(PhoenixKitWeb.Gettext, "Add one")}
-        >
-          <.icon name="hero-plus" class="w-3 h-3" />
+          <.icon name="hero-viewfinder-circle" class="w-3.5 h-3.5" />
+          {Gettext.gettext(PhoenixKitWeb.Gettext, "Fit screen")}
         </button>
       </div>
     </div>
@@ -954,28 +999,32 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   attr(:empty, :boolean, default: false)
 
   defp grid_mode(assigns) do
+    entry =
+      Dashboards.get_layout(assigns.dashboard, assigns.active_layout) ||
+        %{"name" => "Layout", "cols" => 64, "rows" => 36}
+
     assigns =
       assign(assigns,
         items: Dashboards.resolve_items(assigns.dashboard, assigns.active_layout),
-        cols: Dashboards.grid_cols(assigns.dashboard, assigns.active_layout),
-        rows: Dashboards.grid_rows(assigns.dashboard, assigns.active_layout),
-        # Derived from the column count at a constant design-space cell size —
-        # more columns widen the canvas and the fit hook rescales it, so
-        # widget contents shrink uniformly and keep fitting.
-        preview_width: Dashboards.design_width(assigns.dashboard, assigns.active_layout)
+        cols: entry["cols"],
+        rows: entry["rows"],
+        layout_name: entry["name"],
+        design_w: Dashboards.design_width(assigns.dashboard, assigns.active_layout),
+        design_h: Dashboards.design_height(assigns.dashboard, assigns.active_layout)
       )
 
     ~H"""
     <div class="flex min-h-0 flex-1 flex-col">
-      <%!-- The canvas ALWAYS scales to fill the pane width — up or down, on
-      every tier. On-screen size is purely pane-width / design-width; the
-      design space itself is constant-density. --%>
+      <%!-- ONE SCREENFUL, NEVER SCROLLS: the canvas scales to the pane —
+      per-axis stretch when the shapes roughly match (fills edge-to-edge),
+      uniform scale + letterboxed ARTBOARD when they don't (e.g. designing a
+      portrait layout on a landscape monitor). DashboardGridFit owns the math. --%>
       <div
         id="dashboard-grid-fit"
         phx-hook="DashboardGridFit"
-        data-design-width={@preview_width}
-        class="relative flex-1 overflow-auto bg-base-200 p-4"
-        style="scrollbar-gutter: stable;"
+        data-design-width={@design_w}
+        data-design-height={@design_h}
+        class="relative flex flex-1 flex-col items-center justify-center overflow-hidden bg-base-200 p-3"
       >
         <%!-- Empty-board hint floats over the surface; pointer-events-none so
         catalog drops land on the cells underneath. --%>
@@ -991,29 +1040,24 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         {Phoenix.HTML.raw(
           ~s(<noscript><style>.pk-grid-scale-canvas{opacity:1 !important}</style></noscript>)
         )}
-        <div class="pk-grid-scale-spacer relative mx-auto">
+        <%!-- The spacer carries the SCALED dimensions (set by the fit hook) so
+        flex centering positions the artboard; the canvas is scaled inside it. --%>
+        <div class="pk-grid-scale-spacer relative">
           <div
-            class="pk-grid-scale-canvas absolute left-0 top-0"
-            style={"width: #{@preview_width}px; transform-origin: top left; opacity: 0;"}
+            class={[
+              "pk-grid-scale-canvas absolute left-0 top-0",
+              "bg-base-100 shadow-xl ring-1 ring-base-content/10"
+            ]}
+            style={"width: #{@design_w}px; height: #{@design_h}px; transform-origin: top left; opacity: 0;"}
           >
             <div
               id="dashboard-grid"
               phx-hook="DashboardGridDrag"
               data-cols={@cols}
               data-max-rows={@rows}
-              class="relative grid auto-rows-[89px] content-start gap-3"
-              style={"grid-template-columns: repeat(#{@cols}, minmax(0, 1fr)); min-height: calc(#{@rows} * 89px + #{@rows - 1} * 12px);"}
+              class="relative grid h-full w-full content-start"
+              style={grid_style(@cols, @rows, @show_grid_lines)}
             >
-              <%!-- Optional cell guides: real items in the SAME grid, so gaps and
-              strides stay honest with zero duplicated math. pointer-events-none —
-              drags and drops pass straight through to the grid container. --%>
-              <div
-                :for={{x, y} <- if(@show_grid_lines, do: cell_coords(@cols, @rows), else: [])}
-                class="pk-grid-cell pointer-events-none rounded-md bg-base-content/[0.04]"
-                style={"grid-column: #{x + 1}; grid-row: #{y + 1};"}
-                aria-hidden="true"
-              >
-              </div>
               <.widget_card
                 :for={{inst, placement} <- @items}
                 inst={inst}
@@ -1026,9 +1070,35 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
             </div>
           </div>
         </div>
+        <%!-- Artboard caption — editor chrome, so it never scales with the
+        board; the fit hook hides it when the board leaves no room below. --%>
+        <div class="pk-grid-caption pointer-events-none absolute bottom-1 left-0 right-0 text-center font-mono text-[11px] tracking-wide text-base-content/50">
+          {@layout_name} · {@cols}×{@rows}
+        </div>
       </div>
     </div>
     """
+  end
+
+  # The lattice template + (optionally) the cell guides as a CSS background —
+  # exact at any pitch since the lattice is gapless, and zero extra DOM (the
+  # old per-cell divs would be thousands of nodes at 25px cells).
+  defp grid_style(cols, rows, show_grid_lines) do
+    base =
+      "grid-template-columns: repeat(#{cols}, minmax(0, 1fr)); " <>
+        "grid-template-rows: repeat(#{rows}, minmax(0, 1fr));"
+
+    if show_grid_lines do
+      # A dot at each cell corner, not hairlines — at 25px pitch full lines
+      # read as graph paper and moiré under the fit transform; dots stay calm.
+      dot = "color-mix(in oklab, var(--color-base-content) 9%, transparent)"
+
+      base <>
+        " background-image: radial-gradient(circle at 1px 1px, #{dot} 1px, transparent 1.4px);" <>
+        " background-size: #{Lattice.cell()}px #{Lattice.cell()}px;"
+    else
+      base
+    end
   end
 
   # Free/pixel mode — exact-px placement on a scrollable canvas, fit-scaled to
@@ -1093,10 +1163,14 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   attr(:cols, :integer, default: nil)
 
   defp widget_card(assigns) do
+    widget = Registry.get(assigns.inst["widget_key"])
+
     assigns =
       assigns
       |> assign(:limits, card_limits(assigns))
       |> assign(:hidden?, assigns.mode == "grid" and (assigns.placement || %{})["hidden"] == true)
+      |> assign(:views, (widget && widget.views) || [])
+      |> assign(:view_name, current_view_name(widget, assigns.inst))
 
     ~H"""
     <div
@@ -1104,6 +1178,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       phx-hook="DashboardResize"
       class={[
         "sortable-item group/widget relative flex flex-col overflow-hidden rounded-lg border shadow-sm",
+        # The lattice is gapless — this margin IS the visual gap between cards.
+        @mode == "grid" && "m-[2px]",
         if(@hidden?,
           do: "border-dashed border-base-300 bg-base-100/40 opacity-50",
           else: "border-base-300 bg-base-100"
@@ -1160,6 +1236,18 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           >
             <.icon name="hero-chevron-double-down" class="w-3.5 h-3.5" />
           </button>
+          <%!-- View modes are user-chosen (never size-switched): cycle through
+          the widget's declared views right from the toolbar. --%>
+          <button
+            :if={@views != []}
+            type="button"
+            phx-click="cycle_view"
+            phx-value-id={@inst["id"]}
+            class="btn btn-ghost btn-xs btn-square"
+            title={"#{Gettext.gettext(PhoenixKitWeb.Gettext, "View")}: #{@view_name} — #{Gettext.gettext(PhoenixKitWeb.Gettext, "click to cycle")}"}
+          >
+            <.icon name="hero-eye" class="w-3.5 h-3.5" />
+          </button>
           <button
             type="button"
             phx-click="open_settings"
@@ -1198,8 +1286,19 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     """
   end
 
+  defp current_view_name(nil, _inst), do: ""
+
+  defp current_view_name(widget, inst) do
+    key = inst["view"] || Widget.default_view(widget)
+
+    case Enum.find(widget.views, &(&1.key == key)) do
+      %{name: name} -> translate_catalog(name)
+      _ -> key || ""
+    end
+  end
+
   # Resize bounds fed to the DashboardResize hook (as data-*). Grid: the resolved
-  # placement span + the widget type's min/max clamped to the active breakpoint's
+  # placement span + the widget type's min/max clamped to the active layout's
   # columns. Pixel: the default-bp span (unused by the pixel resize, which uses px).
   defp card_limits(%{mode: "grid", inst: inst, placement: placement, cols: cols}) do
     {min, max} = widget_size_bounds(inst)
@@ -1222,7 +1321,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   defp card_limits(%{inst: inst}), do: size_limits(inst)
 
-  # Span limits for an instance at a breakpoint (defaulting to the default tier),
+  # Span limits for an instance on a layout,
   # clamped to that tier's column count — the settings modal passes the active
   # tier (and its dashboard-resolved column count) so its W input allows a full
   # row there.
@@ -1236,18 +1335,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     %{w: w, h: h, min_w: min(min.w, cols), max_w: min(max.w, cols), min_h: min.h, max_h: max.h}
   end
 
-  # Every cell of the designable surface, row-major, for the grid guides.
-  defp cell_coords(cols, rows) do
-    for y <- 0..(rows - 1), x <- 0..(cols - 1), do: {x, y}
-  end
-
   # Min/max span for an instance — the min follows its selected view when that
   # view declares one (mirrors the context's clamp); falls back to a permissive
   # range for an instance whose provider is no longer installed.
   defp widget_size_bounds(inst) do
     case Registry.get(inst["widget_key"]) do
       %Widget{} = widget -> {instance_min(inst, widget), widget.max_size}
-      _ -> {%{w: 1, h: 1}, %{w: Breakpoints.max_grid_cols(), h: 8}}
+      _ -> {%{w: 1, h: 1}, %{w: Lattice.max_dim(), h: Lattice.max_dim()}}
     end
   end
 

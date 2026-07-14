@@ -38,7 +38,8 @@ defmodule PhoenixKitDashboards.Widgets do
       gettext_noop("Show the config/stats map any PhoenixKit module exposes via get_config/0."),
       gettext_noop("Detailed (table)"),
       gettext_noop("Compact (counts)"),
-      gettext_noop("Module")
+      gettext_noop("Module"),
+      gettext_noop("Items")
     ]
   end
 
@@ -52,8 +53,8 @@ defmodule PhoenixKitDashboards.Widgets do
         description: "A free-text note for reminders, links, or context — Markdown supported.",
         icon: "hero-pencil-square",
         component: NoteWidget,
-        default_size: %{w: 4, h: 2},
-        min_size: %{w: 2, h: 1},
+        default_size: %{w: 16, h: 8},
+        min_size: %{w: 8, h: 4},
         category: "Built-in",
         settings_schema: [
           %{key: "title", type: :string, label: "Title", default: "Note"},
@@ -66,16 +67,16 @@ defmodule PhoenixKitDashboards.Widgets do
         description: "Current time — normal, digital or analog, with a per-clock timezone.",
         icon: "hero-clock",
         component: ClockWidget,
-        default_size: %{w: 3, h: 2},
-        min_size: %{w: 2, h: 1},
+        default_size: %{w: 12, h: 8},
+        min_size: %{w: 8, h: 4},
         # Ticks live — the host re-renders it every second.
         refresh_interval: 1000,
         # Each view carries its own minimum: the analog face needs a squarer
         # box than a line of digits (the per-view min_size API demo).
         views: [
-          %{key: "normal", name: "Normal", min_size: %{w: 2, h: 1}},
-          %{key: "digital", name: "Digital", min_size: %{w: 3, h: 1}},
-          %{key: "analog", name: "Analog", min_size: %{w: 2, h: 2}}
+          %{key: "normal", name: "Normal", min_size: %{w: 8, h: 4}},
+          %{key: "digital", name: "Digital", min_size: %{w: 12, h: 4}},
+          %{key: "analog", name: "Analog", min_size: %{w: 8, h: 8}}
         ],
         category: "Built-in",
         settings_schema: [
@@ -103,8 +104,8 @@ defmodule PhoenixKitDashboards.Widgets do
         description: "Show the config/stats map any PhoenixKit module exposes via get_config/0.",
         icon: "hero-chart-bar",
         component: ModuleStatsWidget,
-        default_size: %{w: 4, h: 2},
-        min_size: %{w: 2, h: 1},
+        default_size: %{w: 16, h: 8},
+        min_size: %{w: 8, h: 4},
         # Two render variants — the widget also collapses to the compact layout
         # automatically when the instance is sized too small for the table.
         views: [
@@ -119,7 +120,10 @@ defmodule PhoenixKitDashboards.Widgets do
             label: "Module",
             options: ModuleStatsWidget.module_options(),
             default: ""
-          }
+          },
+          # The N-slot row budget for the detailed view: the box divides into
+          # this many rows; type scales to the slot. Nothing ever scrolls.
+          %{key: "items", type: :number, label: "Items", default: 6}
         ]
       }
     ]

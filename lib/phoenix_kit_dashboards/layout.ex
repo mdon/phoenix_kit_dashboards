@@ -5,11 +5,11 @@ defmodule PhoenixKitDashboards.Layout do
       %{
         "id" => "…", "widget_key" => "…", "settings" => %{…}, "view" => "…",
         "pixel" => %{"fx" => .., "fy" => .., "fw" => .., "fh" => ..},   # pixel canvas
-        "bp"    => %{"desktop" => %{"w" => .., "h" => .., "hidden" => ..}}  # grid, per breakpoint
+        "bp"    => %{"l1" => %{"w" => .., "h" => .., "hidden" => ..}}  # grid, per layout
       }
 
-  Pixel dashboards use `pixel`; grid dashboards use `bp[<breakpoint>]` (flow order
-  = list position). Keeping geometry *embedded per widget* means add/remove is
+  Pixel dashboards use `pixel`; grid dashboards use `bp[<layout id>]` (the
+  storage key stays `"bp"`; flow order = list position). Keeping geometry *embedded per widget* means add/remove is
   atomic — no separate placement map to keep in sync.
 
   Accessors default missing values and fall back to the **legacy flat shape**
@@ -18,7 +18,9 @@ defmodule PhoenixKitDashboards.Layout do
   """
 
   @pixel_defaults %{"fx" => 0, "fy" => 0, "fw" => 480, "fh" => 280}
-  @grid_defaults %{"w" => 4, "h" => 2, "hidden" => false}
+  # Span fallback at lattice scale — only rendered for widgets whose module is
+  # uninstalled; known widgets pack at their type default (Dashboards).
+  @grid_defaults %{"w" => 16, "h" => 8, "hidden" => false}
 
   @doc "The widget's pixel-canvas geometry (`fx/fy/fw/fh`), defaulted."
   @spec pixel(map()) :: %{optional(String.t()) => term()}
@@ -33,21 +35,21 @@ defmodule PhoenixKitDashboards.Layout do
     Map.put(item, "pixel", Map.merge(pixel(item), stringify(attrs)))
   end
 
-  @doc "The widget's grid placement (`w/h/hidden`) for a breakpoint, defaulted."
+  @doc "The widget's grid placement (`w/h/hidden`) for a layout, defaulted."
   @spec placement(map(), String.t()) :: %{optional(String.t()) => term()}
   def placement(item, bp) when is_map(item) and is_binary(bp) do
     stored = get_in(item, ["bp", bp]) || take(item, ~w(w h hidden))
     Map.merge(@grid_defaults, stored)
   end
 
-  @doc "Set a breakpoint's grid placement, upgrading the item to nested shape."
+  @doc "Set a layout's grid placement, upgrading the item to nested shape."
   @spec put_placement(map(), String.t(), map()) :: map()
   def put_placement(item, bp, attrs) when is_binary(bp) and is_map(attrs) do
     bpmap = Map.get(item, "bp", %{})
     Map.put(item, "bp", Map.put(bpmap, bp, Map.merge(placement(item, bp), stringify(attrs))))
   end
 
-  @doc "Whether the widget is hidden on a breakpoint."
+  @doc "Whether the widget is hidden on a layout."
   @spec hidden?(map(), String.t()) :: boolean()
   def hidden?(item, bp), do: placement(item, bp)["hidden"] == true
 

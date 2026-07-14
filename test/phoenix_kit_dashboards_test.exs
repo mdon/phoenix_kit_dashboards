@@ -274,51 +274,49 @@ defmodule PhoenixKitDashboardsTest do
                widget.settings_schema
     end
 
-    test "sanitizes incoherent size bounds (min <= default <= max, width within the col cap)" do
+    test "sanitizes incoherent size bounds (min <= default <= max, within the lattice cap)" do
       {:ok, widget} =
         Widget.from_map(
           %{
             key: "x",
             name: "Y",
             component: DummyComponent,
-            min_size: %{w: 30, h: 0},
-            max_size: %{w: 40, h: 3},
-            default_size: %{w: 1, h: 99}
+            min_size: %{w: 170, h: 0},
+            max_size: %{w: 300, h: 12},
+            default_size: %{w: 1, h: 999}
           },
           :prov
         )
 
-      # min_w clamped into [1, max_grid_cols], max_w >= min_w and <= the cap
-      # (24 — the max per-dashboard column count), min_h >= 1, default clamped
-      # into [min, max] per dimension.
-      cap = PhoenixKitDashboards.Breakpoints.max_grid_cols()
+      # min_w clamped into [1, max_dim], max_w >= min_w and <= the lattice cap
+      # (160), min_h >= 1, default clamped into [min, max] per dimension.
+      cap = PhoenixKitDashboards.Lattice.max_dim()
       assert widget.min_size == %{w: cap, h: 1}
-      assert widget.max_size == %{w: cap, h: 3}
-      assert widget.default_size == %{w: cap, h: 3}
+      assert widget.max_size == %{w: cap, h: 12}
+      assert widget.default_size == %{w: cap, h: 12}
     end
 
-    test "the width cap is the max per-dashboard column count" do
-      assert PhoenixKitDashboards.Breakpoints.max_grid_cols() == 24
+    test "the width cap is the lattice dimension bound" do
+      assert PhoenixKitDashboards.Lattice.max_dim() == 160
 
       {:ok, widget} =
         Widget.from_map(
-          %{key: "x", name: "Y", component: DummyComponent, max_size: %{w: 16, h: 4}},
+          %{key: "x", name: "Y", component: DummyComponent, max_size: %{w: 40, h: 16}},
           :prov
         )
 
-      assert widget.max_size.w == 16
+      assert widget.max_size.w == 40
 
-      # A provider that declares no max at all can span a full 24-col row.
+      # A provider that declares no max at all can span the full lattice.
       {:ok, unbounded} = Widget.from_map(%{key: "x", name: "Y", component: DummyComponent}, :prov)
-      assert unbounded.max_size.w == 24
+      assert unbounded.max_size.w == 160
     end
 
-    test "design_width derives from the column count at a constant cell size" do
-      # 12 cols reproduce the classic 1200px desktop canvas exactly.
-      assert PhoenixKitDashboards.Breakpoints.design_width(12) == 1200
-      assert PhoenixKitDashboards.Breakpoints.design_width(4) == 392
-      # More columns = wider canvas (the fit-scaler shrinks it on screen).
-      assert PhoenixKitDashboards.Breakpoints.design_width(24) == 2412
+    test "design dims derive from the lattice's 25px square cell" do
+      assert PhoenixKitDashboards.Lattice.cell() == 25
+      assert PhoenixKitDashboards.Lattice.design_width(64) == 1600
+      assert PhoenixKitDashboards.Lattice.design_height(36) == 900
+      assert PhoenixKitDashboards.Lattice.design_width(160) == 4000
     end
   end
 

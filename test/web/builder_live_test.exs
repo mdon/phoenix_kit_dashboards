@@ -12,7 +12,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
   end
 
   # The (single) widget's default-breakpoint grid placement / pixel geometry.
-  defp grid(uuid), do: Layout.placement(hd(Dashboards.get(uuid).layout), "desktop")
+  defp grid(uuid), do: Layout.placement(hd(Dashboards.get(uuid).layout), "l1")
   defp pixel(uuid), do: Layout.pixel(hd(Dashboards.get(uuid).layout))
 
   # Every rendered clock time (HH:MM:SS), in DOM order.
@@ -91,11 +91,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       dashboard = fixture_dashboard(user.uuid)
 
       {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-      render_hook(view, "set_bp", %{"bp" => "desktop"})
       html = render_hook(view, "add_widget_at", %{"key" => "core.note", "x" => 6, "y" => 3})
 
       assert [inst] = Dashboards.get(dashboard.uuid).layout
-      assert %{"x" => 6, "y" => 3} = Layout.placement(inst, "desktop")
+      assert %{"x" => 6, "y" => 3} = Layout.placement(inst, "l1")
       assert html =~ ~s(grid-column: 7 / span)
       assert html =~ ~s(grid-row: 4 / span)
     end
@@ -145,7 +144,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       assert html =~ ~s(id="dashboard-grid")
       assert html =~ "Add widgets from the panel"
       # ...so the Show-grid toggle works on an empty board too.
-      assert render_click(view, "toggle_grid_lines", %{}) =~ "pk-grid-cell"
+      assert render_click(view, "toggle_grid_lines", %{}) =~ "radial-gradient"
     end
 
     test "the Show-grid toggle renders cell guides (off by default)", %{conn: conn} do
@@ -154,14 +153,15 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
 
       {:ok, view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-      refute html =~ "pk-grid-cell"
+      refute html =~ "radial-gradient"
 
+      # Guides are a CSS dot lattice at the exact 25px cell pitch — zero extra
+      # DOM (per-cell divs would be thousands of nodes on the fine lattice).
       on_html = render_click(view, "toggle_grid_lines", %{})
-      assert on_html =~ "pk-grid-cell"
-      # Every cell of the designable surface: desktop default 12 x 15.
-      assert length(String.split(on_html, "pk-grid-cell")) - 1 == 12 * 15
+      assert on_html =~ "radial-gradient"
+      assert on_html =~ "background-size: 25px 25px"
 
-      refute render_click(view, "toggle_grid_lines", %{}) =~ "pk-grid-cell"
+      refute render_click(view, "toggle_grid_lines", %{}) =~ "radial-gradient"
     end
 
     test "renders the server grid with the cell-drag hook, not gridstack", %{conn: conn} do
@@ -190,12 +190,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       # editable, with the fit + drag + resize hooks in place.
       refute html =~ "loading-spinner"
       refute html =~ "DashboardBreakpoint"
-      assert html =~ ~s(data-cols="12")
+      assert html =~ ~s(data-cols="64")
       assert html =~ "DashboardGridFit"
       assert html =~ ~s(phx-hook="DashboardGridDrag")
       assert html =~ ~s(phx-hook="DashboardResize")
-      # The layout tab strip with the adapted legacy layout + the add button.
-      assert html =~ "Desktop"
+      # The layout tab strip with the default layout + the add button.
+      assert html =~ "Layout 1"
       assert html =~ ~s(phx-click="add_layout")
       # Catalog starts hidden.
       assert html =~ ~r/id="dashboard-catalog"[^>]*style="display: none"/
@@ -205,17 +205,17 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       {conn, user} = sign_in(conn)
       dashboard = fixture_dashboard(user.uuid)
       {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
-      {:ok, dashboard, entry} = Dashboards.add_layout(dashboard, "desktop")
+      {:ok, dashboard, entry} = Dashboards.add_layout(dashboard, "l1")
       {:ok, dashboard} = Dashboards.rename_layout(dashboard, entry["id"], "Wall TV")
       {:ok, dashboard} = Dashboards.resize_grid(dashboard, entry["id"], :cols, 1)
 
       {:ok, _view, html} =
         live(conn, "/en/admin/dashboards/#{dashboard.uuid}?layout=#{entry["id"]}")
 
-      assert html =~ ~s(data-cols="13")
+      assert html =~ ~s(data-cols="65")
 
       {:ok, _view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}?layout=ghost")
-      assert html =~ ~s(data-cols="12")
+      assert html =~ ~s(data-cols="64")
     end
 
     test "layout tabs: add creates + activates + enters rename mode; rename and delete work",
@@ -228,7 +228,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
 
       # "+" creates a copy of the active layout and drops into rename mode.
       html = render_click(view, "add_layout", %{})
-      assert html =~ "Layout 1"
+      assert html =~ "Layout 2"
       assert html =~ ~s(phx-submit="rename_layout")
 
       new_id =
@@ -242,14 +242,14 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       # Deleting the active layout falls back to the first one.
       html = render_click(view, "delete_layout", %{"id" => new_id})
       refute html =~ "Portrait"
-      assert html =~ ~s(data-cols="12")
+      assert html =~ ~s(data-cols="64")
 
       # The last layout is protected.
-      html = render_click(view, "delete_layout", %{"id" => "desktop"})
+      html = render_click(view, "delete_layout", %{"id" => "l1"})
       assert html =~ "at least one layout"
 
       # Hostile ids are no-ops.
-      assert render_click(view, "set_layout", %{"id" => "ghost"}) =~ ~s(data-cols="12")
+      assert render_click(view, "set_layout", %{"id" => "ghost"}) =~ ~s(data-cols="64")
     end
 
     test "reorder_widgets event persists the new order", %{conn: conn} do
@@ -260,13 +260,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       [a, b] = Enum.map(dashboard.layout, & &1["id"])
 
       {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-      # The builder opens at the largest tier; edit the desktop tier for this test.
-      render_hook(view, "set_bp", %{"bp" => "desktop"})
       render_hook(view, "reorder_widgets", %{"ordered_ids" => [b, a], "moved_id" => b})
 
       # Reorder writes per-breakpoint `pos`; the render order comes from resolve_items.
       ordered =
-        Dashboards.resolve_items(Dashboards.get(dashboard.uuid), "desktop")
+        Dashboards.resolve_items(Dashboards.get(dashboard.uuid), "l1")
         |> Enum.map(fn {i, _} -> i["id"] end)
 
       assert ordered == [b, a]
@@ -280,23 +278,22 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       [%{"id" => a}, %{"id" => b}] = dashboard.layout
 
       {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-      render_hook(view, "set_bp", %{"bp" => "desktop"})
 
       # Anywhere on the grid — including below a gap.
-      html = render_hook(view, "move_widget_grid", %{"id" => a, "x" => 2, "y" => 5})
+      html = render_hook(view, "move_widget_grid", %{"id" => a, "x" => 2, "y" => 10})
 
-      assert %{"x" => 2, "y" => 5} =
-               Layout.placement(hd(Dashboards.get(dashboard.uuid).layout), "desktop")
+      assert %{"x" => 2, "y" => 10} =
+               Layout.placement(hd(Dashboards.get(dashboard.uuid).layout), "l1")
 
       assert html =~ ~s(grid-column: 3 / span)
-      assert html =~ ~s(grid-row: 6 / span)
+      assert html =~ ~s(grid-row: 11 / span)
 
       # An occupied spot is refused (crafted event; the hook never offers one).
-      render_hook(view, "move_widget_grid", %{"id" => b, "x" => 2, "y" => 5})
+      render_hook(view, "move_widget_grid", %{"id" => b, "x" => 2, "y" => 10})
 
       refute match?(
-               %{"x" => 2, "y" => 5},
-               Dashboards.resolve_placement(Dashboards.get(dashboard.uuid), b, "desktop")
+               %{"x" => 2, "y" => 10},
+               Dashboards.resolve_placement(Dashboards.get(dashboard.uuid), b, "l1")
              )
     end
 
@@ -307,16 +304,14 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       [%{"id" => id}] = dashboard.layout
 
       {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-      # The builder opens at the largest tier; edit the desktop (12-col) tier here.
-      render_hook(view, "set_bp", %{"bp" => "desktop"})
 
       render_hook(view, "resize_widget_to", %{"id" => id, "w" => 8, "h" => 5})
       assert %{"w" => 8, "h" => 5} = grid(dashboard.uuid)
 
-      # An out-of-range span is clamped to the widget type's max, never persisted raw.
-      render_hook(view, "resize_widget_to", %{"id" => id, "w" => 99, "h" => 99})
+      # An out-of-range span is clamped to the SCREENFUL, never persisted raw.
+      render_hook(view, "resize_widget_to", %{"id" => id, "w" => 999, "h" => 999})
       %{"w" => w, "h" => h} = grid(dashboard.uuid)
-      assert w <= 12 and h <= 8 and w < 99 and h < 99
+      assert w <= 64 and h <= 36
     end
 
     test "each widget card carries the resize hook + min/max bounds for the drag", %{conn: conn} do
@@ -568,7 +563,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       [%{"id" => id}] = dashboard.layout
 
       {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-      render_hook(view, "set_bp", %{"bp" => "desktop"})
       view |> element("button[phx-click='open_settings'][phx-value-id='#{id}']") |> render_click()
 
       # Opt out of the floor and shrink below it in the same submit — configure
@@ -583,7 +577,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
 
       reloaded = Dashboards.get(dashboard.uuid)
       assert [%{"min_override" => true}] = reloaded.layout
-      assert %{"w" => 1, "h" => 1} = Dashboards.resolve_placement(reloaded, id, "desktop")
+      assert %{"w" => 1, "h" => 1} = Dashboards.resolve_placement(reloaded, id, "l1")
     end
 
     test "the Settings modal W×H inputs resize the widget (no-hook fallback)", %{conn: conn} do
@@ -593,15 +587,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       [%{"id" => id}] = dashboard.layout
 
       {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-      # The builder opens at the largest tier; edit the desktop tier for this test.
-      render_hook(view, "set_bp", %{"bp" => "desktop"})
       view |> element("button[phx-click='open_settings'][phx-value-id='#{id}']") |> render_click()
 
       view
-      |> form("form[phx-submit='save_settings']", %{"w" => "7", "h" => "4"})
+      |> form("form[phx-submit='save_settings']", %{"w" => "20", "h" => "10"})
       |> render_submit()
 
-      assert %{"w" => 7, "h" => 4} = grid(dashboard.uuid)
+      assert %{"w" => 20, "h" => 10} = grid(dashboard.uuid)
     end
 
     test "on a PACKED placement the modal shows the resolved size (save doesn't shrink it)",
@@ -610,10 +602,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       dashboard = fixture_dashboard(user.uuid)
       {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
       [%{"id" => id}] = dashboard.layout
-      {:ok, dashboard} = Dashboards.resize_widget(dashboard, id, "desktop", 10, 5)
+      {:ok, dashboard} = Dashboards.resize_widget(dashboard, id, "l1", 10, 5)
       # A second layout, then STRIP the widget's stored placement there so the
       # layout renders it packed-at-render (the modal must show the packed size).
-      {:ok, dashboard, entry} = Dashboards.add_layout(dashboard, "desktop")
+      {:ok, dashboard, entry} = Dashboards.add_layout(dashboard, "l1")
       layout_id = entry["id"]
 
       {:ok, dashboard} =
@@ -624,10 +616,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
           end)
         )
 
-      # Without a stored placement the widget packs at its DEFAULT span (4x2) —
-      # layouts are independent, there is no cross-layout derivation anymore.
+      # Without a stored placement the widget packs at its DEFAULT span (16x8) —
+      # layouts are independent, there is no cross-layout derivation.
       packed = Dashboards.resolve_placement(dashboard, id, layout_id)
-      assert %{"w" => 4, "h" => 2} = packed
+      assert %{"w" => 16, "h" => 8} = packed
 
       {:ok, view, _html} =
         live(conn, "/en/admin/dashboards/#{dashboard.uuid}?layout=#{layout_id}")
@@ -642,15 +634,15 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       assert html =~ ~s(name="w") and html =~ ~s(value="#{packed["w"]}")
 
       view
-      |> form("form[phx-submit='save_settings']", %{"w" => "4", "h" => "2"})
+      |> form("form[phx-submit='save_settings']", %{"w" => "16", "h" => "8"})
       |> render_submit()
 
-      assert %{"w" => 4, "h" => 2} =
+      assert %{"w" => 16, "h" => 8} =
                Dashboards.resolve_placement(Dashboards.get(dashboard.uuid), id, layout_id)
 
       # The desktop layout kept its distinctive 10x5 — untouched by the edit.
       assert %{"w" => 10, "h" => 5} =
-               Dashboards.resolve_placement(Dashboards.get(dashboard.uuid), id, "desktop")
+               Dashboards.resolve_placement(Dashboards.get(dashboard.uuid), id, "l1")
     end
   end
 
