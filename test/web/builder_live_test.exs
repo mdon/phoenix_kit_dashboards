@@ -136,6 +136,23 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
   end
 
   describe "grid (Phoenix-first / cell placement)" do
+    test "the Show-grid toggle renders cell guides (off by default)", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
+
+      {:ok, view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      refute html =~ "pk-grid-cell"
+
+      on_html = render_click(view, "toggle_grid_lines", %{})
+      assert on_html =~ "pk-grid-cell"
+      # Every cell of the designable surface: desktop default 12 x 15.
+      assert length(String.split(on_html, "pk-grid-cell")) - 1 == 12 * 15
+
+      refute render_click(view, "toggle_grid_lines", %{}) =~ "pk-grid-cell"
+    end
+
+
     test "renders the server grid with the cell-drag hook, not gridstack", %{conn: conn} do
       {conn, user} = sign_in(conn)
       dashboard = fixture_dashboard(user.uuid)

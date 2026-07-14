@@ -119,6 +119,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
      # fit" banner). The grid is always fit-scaled + editable regardless.
      |> assign(:scaled?, false)
      |> assign(:refresh_at, %{})
+     # QoL: show the empty grid cells while designing (session-local toggle).
+     |> assign(:show_grid_lines, false)
      |> assign(:refresh_scheduled?, false)}
   end
 
@@ -288,6 +290,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       true ->
         {:noreply, apply_screen_bp(socket, screen_bp)}
     end
+  end
+
+  @impl true
+  def handle_event("toggle_grid_lines", _params, socket) do
+    {:noreply, update(socket, :show_grid_lines, &(!&1))}
   end
 
   # Grow/shrink the active tier's grid by one column or row (the Layout bar's
@@ -730,6 +737,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           active_bp={@active_bp}
           detected={@detected?}
           scaled={@scaled?}
+          show_grid_lines={@show_grid_lines}
         />
         <.catalog_drawer catalog={@catalog} />
       </div>
@@ -755,6 +763,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   attr(:active_bp, :string, required: true)
   attr(:detected, :boolean, required: true)
   attr(:scaled, :boolean, required: true)
+  attr(:show_grid_lines, :boolean, required: true)
 
   defp grid(assigns) do
     mode = Dashboard.layout_mode(assigns.dashboard)
@@ -795,7 +804,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       </div>
 
       <div class={["pk-grid-ready flex min-h-0 flex-1 flex-col", not @revealed && "hidden"]}>
-        <.mode_bar :if={@mode == "grid"} active_bp={@active_bp} dashboard={@dashboard} />
+        <.mode_bar
+          :if={@mode == "grid"}
+          active_bp={@active_bp}
+          dashboard={@dashboard}
+          show_grid_lines={@show_grid_lines}
+        />
 
         <div
           :if={@dashboard.layout == []}
@@ -811,6 +825,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           scope={@scope}
           active_bp={@active_bp}
           scaled={@scaled}
+          show_grid_lines={@show_grid_lines}
         />
         <.free_mode :if={@dashboard.layout != [] and @mode == "free"} dashboard={@dashboard} scope={@scope} />
       </div>
@@ -820,6 +835,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   attr(:active_bp, :string, required: true)
   attr(:dashboard, :map, required: true)
+  attr(:show_grid_lines, :boolean, required: true)
 
   defp mode_bar(assigns) do
     ~H"""
@@ -858,6 +874,17 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       is laid out at the tier design width and fit-scaled — more columns just
       means narrower cells); extra rows extend downward and the pane scrolls. --%>
       <div class="ml-auto flex items-center gap-3">
+        <label class="flex cursor-pointer items-center gap-1.5">
+          <span class="text-xs font-medium text-base-content/50">
+            {Gettext.gettext(PhoenixKitWeb.Gettext, "Show grid")}
+          </span>
+          <input
+            type="checkbox"
+            class="toggle toggle-xs"
+            phx-click="toggle_grid_lines"
+            checked={@show_grid_lines}
+          />
+        </label>
         <.dim_control
           label={Gettext.gettext(PhoenixKitWeb.Gettext, "Columns")}
           dim="cols"
@@ -917,6 +944,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   attr(:scope, :any, required: true)
   attr(:active_bp, :string, required: true)
   attr(:scaled, :boolean, required: true)
+  attr(:show_grid_lines, :boolean, required: true)
 
   defp grid_mode(assigns) do
     bp = Breakpoints.get(assigns.active_bp) || Breakpoints.get(Breakpoints.default())
@@ -969,6 +997,16 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
               class="relative grid auto-rows-[8rem] content-start gap-3"
               style={"grid-template-columns: repeat(#{@cols}, minmax(0, 1fr)); min-height: calc(#{@rows} * 8rem + #{@rows - 1} * 0.75rem);"}
             >
+              <%!-- Optional cell guides: real items in the SAME grid, so gaps and
+              strides stay honest with zero duplicated math. pointer-events-none —
+              drags and drops pass straight through to the grid container. --%>
+              <div
+                :for={{x, y} <- if(@show_grid_lines, do: cell_coords(@cols, @rows), else: [])}
+                class="pk-grid-cell pointer-events-none rounded-lg border border-dashed border-base-content/15"
+                style={"grid-column: #{x + 1}; grid-row: #{y + 1};"}
+                aria-hidden="true"
+              >
+              </div>
               <.widget_card
                 :for={{inst, placement} <- @items}
                 inst={inst}
@@ -1189,6 +1227,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     {min, max} = widget_size_bounds(inst)
 
     %{w: w, h: h, min_w: min(min.w, cols), max_w: min(max.w, cols), min_h: min.h, max_h: max.h}
+  end
+
+  # Every cell of the designable surface, row-major, for the grid guides.
+  defp cell_coords(cols, rows) do
+    for y <- 0..(rows - 1), x <- 0..(cols - 1), do: {x, y}
   end
 
   # Breakpoint tier thresholds (largest→smallest) as JSON for the detect hook.
