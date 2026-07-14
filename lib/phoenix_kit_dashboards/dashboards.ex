@@ -23,9 +23,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   # Free/pixel-canvas widget size bounds (px).
   @free_min_px 60
   @free_max_px 4000
-  # Per-dashboard grid dimension bounds. Columns cap above the largest tier
-  # default (16) for finer granularity; rows cap at the hard placement bound.
-  @max_grid_cols 24
+
   # px per grid col/row when seeding a new widget's pixel geometry from its span.
   @pixel_seed_col 120
   @pixel_seed_row 140
@@ -546,7 +544,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   """
   @spec grid_cols(Dashboard.t(), String.t()) :: pos_integer()
   def grid_cols(%Dashboard{} = dashboard, bp) do
-    dim_override(dashboard, bp, "cols", 1, @max_grid_cols) || Breakpoints.cols(bp)
+    dim_override(dashboard, bp, "cols", 1, Breakpoints.max_grid_cols()) || Breakpoints.cols(bp)
   end
 
   @doc """
@@ -570,8 +568,8 @@ defmodule PhoenixKitDashboards.Dashboards do
   Grow/shrink the grid by one column or row on `bp` (the builder's +/- header
   controls). Shrinking is refused with `{:error, :occupied}` while any widget
   occupies the column/row being removed — move the widget first. Columns are
-  bounded to `1..#{@max_grid_cols}`, rows to `1..#{Grid.max_rows()}` (the hard
-  placement bound). Marks the breakpoint customized (a grid dimension is a
+  bounded to `1..#{Breakpoints.max_grid_cols()}`, rows to `1..#{Grid.max_rows()}`
+  (the hard placement bound). Marks the breakpoint customized (a grid dimension is a
   design decision for that tier). A layout tweak — not activity-logged.
   """
   @spec resize_grid(Dashboard.t(), String.t(), :cols | :rows, integer()) ::
@@ -580,7 +578,7 @@ defmodule PhoenixKitDashboards.Dashboards do
       when is_binary(bp) and dim in [:cols, :rows] and delta in [-1, 1] do
     {current, hi} =
       case dim do
-        :cols -> {grid_cols(dashboard, bp), @max_grid_cols}
+        :cols -> {grid_cols(dashboard, bp), Breakpoints.max_grid_cols()}
         :rows -> {grid_rows(dashboard, bp), Grid.max_rows()}
       end
 
@@ -611,6 +609,17 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   # Would shrinking to `target` cols/rows cut into any resolved placement?
   # (Hidden widgets keep their cells, so they count too.)
+  @doc """
+  The design-space canvas width for a dashboard at `bp` — derived from its
+  column count at a constant cell size (`Breakpoints.design_width/1`). More
+  columns = a wider canvas that the builder's fit hook scales down, so widget
+  contents shrink uniformly and always keep fitting.
+  """
+  @spec design_width(Dashboard.t(), String.t()) :: pos_integer()
+  def design_width(%Dashboard{} = dashboard, bp) do
+    Breakpoints.design_width(grid_cols(dashboard, bp))
+  end
+
   defp dim_occupied?(dashboard, bp, dim, target) do
     dashboard
     |> resolve_items(bp)
@@ -1102,7 +1111,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   defp size_bounds(item) do
     case Registry.get(item["widget_key"]) do
       %Widget{} = widget -> {instance_min(item, widget), widget.max_size}
-      _ -> {%{w: 1, h: 1}, %{w: Breakpoints.max_cols(), h: 8}}
+      _ -> {%{w: 1, h: 1}, %{w: Breakpoints.max_grid_cols(), h: 8}}
     end
   end
 

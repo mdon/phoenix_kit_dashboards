@@ -66,9 +66,9 @@ defmodule PhoenixKitDashboards.Widget do
             component: nil,
             default_size: %{w: 4, h: 2},
             min_size: %{w: 2, h: 1},
-            # Width cap = the largest breakpoint tier's columns (16, the TV row);
-            # each tier clamps placements to its own column count on top.
-            max_size: %{w: 16, h: 8},
+            # Width cap = the max per-dashboard column count (24); each
+            # dashboard clamps placements to its own column count on top.
+            max_size: %{w: 24, h: 8},
             settings_schema: [],
             # Optional named render variants (e.g. detailed vs simple vs color
             # grid). Empty = a single intrinsic view. The selected view key +
@@ -140,7 +140,7 @@ defmodule PhoenixKitDashboards.Widget do
         sanitized_sizes(
           normalize_size(map[:default_size], %{w: 4, h: 2}),
           normalize_size(map[:min_size], %{w: 2, h: 1}),
-          normalize_size(map[:max_size], %{w: Breakpoints.max_cols(), h: 8})
+          normalize_size(map[:max_size], %{w: Breakpoints.max_grid_cols(), h: 8})
         )
 
       {:ok,
@@ -282,12 +282,12 @@ defmodule PhoenixKitDashboards.Widget do
   defp normalize_size(_, default), do: default
 
   # Keep the size bounds coherent — min <= default <= max, width within the
-  # LARGEST breakpoint tier's columns (16, the TV row; each tier clamps
-  # placements to its own count), every dimension >= 1 — so a malformed provider
+  # max per-dashboard column count (24; each dashboard clamps placements to
+  # its own count), every dimension >= 1 — so a malformed provider
   # (e.g. `min_w > max_w`) can't make the resize hook's client-side limits
   # disagree with what the server clamps to and renders.
   defp sanitized_sizes(default, min, max) do
-    cap = Breakpoints.max_cols()
+    cap = Breakpoints.max_grid_cols()
     row_cap = PhoenixKitDashboards.Grid.max_rows()
     min_w = clamp(min.w, 1, cap)
     max_w = clamp(max.w, min_w, cap)

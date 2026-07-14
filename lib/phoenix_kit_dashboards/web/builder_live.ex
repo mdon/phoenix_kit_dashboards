@@ -960,7 +960,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         items: Dashboards.resolve_items(assigns.dashboard, assigns.active_bp),
         cols: Dashboards.grid_cols(assigns.dashboard, assigns.active_bp),
         rows: Dashboards.grid_rows(assigns.dashboard, assigns.active_bp),
-        preview_width: bp.preview_width,
+        # Derived from the column count at a constant design-space cell size —
+        # more columns widen the canvas and the fit hook scales it down, so
+        # widget contents shrink uniformly and keep fitting.
+        preview_width: Dashboards.design_width(assigns.dashboard, assigns.active_bp),
         bp_label: bp_label(bp.key)
       )
 
@@ -1269,7 +1272,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   defp widget_size_bounds(inst) do
     case Registry.get(inst["widget_key"]) do
       %Widget{} = widget -> {instance_min(inst, widget), widget.max_size}
-      _ -> {%{w: 1, h: 1}, %{w: Breakpoints.max_cols(), h: 8}}
+      _ -> {%{w: 1, h: 1}, %{w: Breakpoints.max_grid_cols(), h: 8}}
     end
   end
 

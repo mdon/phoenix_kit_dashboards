@@ -1183,7 +1183,10 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       // phone design isn't blown up comically on a desktop.
       var fullscreen = document.fullscreenElement && document.fullscreenElement.contains(this.el);
       var fill = fullscreen || this.el.getAttribute("data-fill") === "true";
-      var scale = fill ? avail / designW : Math.min(1, avail / designW);
+      // Fill is capped at 2x: design width now derives from the column count,
+      // so a low-column board has a narrow canvas — uncapped fill would blow
+      // its widgets up comically on a wide pane.
+      var scale = fill ? Math.min(2, avail / designW) : Math.min(1, avail / designW);
 
       canvas.style.transformOrigin = "top left";
       canvas.style.transform = "scale(" + scale + ")";

@@ -11,26 +11,34 @@ defmodule PhoenixKitDashboards.Breakpoints do
   Pixel dashboards do not use breakpoints (a single scaled canvas).
   """
 
-  # `preview_width` is the width the builder previews the tier at (a device frame),
-  # so a phone layout is edited at phone width rather than stretched to the monitor.
   @breakpoints [
     # max_rows = the tier's designable surface (fully rendered + scrollable in
     # the builder): a TV never scrolls, so it gets barely more than one screen;
     # a phone feed runs long. Derived tiers may still overflow it (packing
     # denser content into fewer columns) — that renders fine, the cap only
     # bounds MANUAL placement and the scroll surface.
-    %{key: "tv", label: "TV", min_width: 1920, cols: 16, preview_width: 1600, max_rows: 8},
-    %{
-      key: "desktop",
-      label: "Desktop",
-      min_width: 1280,
-      cols: 12,
-      preview_width: 1200,
-      max_rows: 15
-    },
-    %{key: "ipad", label: "iPad", min_width: 768, cols: 8, preview_width: 820, max_rows: 24},
-    %{key: "phone", label: "Phone", min_width: 0, cols: 4, preview_width: 390, max_rows: 36}
+    #
+    # There is NO per-tier design width: a tier is just its column count. The
+    # canvas width derives from it (`design_width/1`) at a CONSTANT cell size,
+    # so widget contents always render at the density the widget contract was
+    # designed for and the fit-scaler shrinks everything uniformly.
+    %{key: "tv", label: "TV", min_width: 1920, cols: 16, max_rows: 8},
+    %{key: "desktop", label: "Desktop", min_width: 1280, cols: 12, max_rows: 15},
+    %{key: "ipad", label: "iPad", min_width: 768, cols: 8, max_rows: 24},
+    %{key: "phone", label: "Phone", min_width: 0, cols: 4, max_rows: 36}
   ]
+
+  # The design-space cell: every grid lays out at this cell width regardless of
+  # column count (12 cols -> the classic 1200px desktop canvas). The gap must
+  # match the builder grid's gap-3 (0.75rem = 12px); row height is the grid's
+  # auto-rows 8rem. Widgets are designed against THIS density — more columns
+  # widen the canvas and the fit hook scales the whole thing down, shrinking
+  # widget contents uniformly so they always keep fitting.
+  @design_cell_w 89
+  @design_gap 12
+
+  # Hard upper bound for per-dashboard column overrides (and widget spans).
+  @max_grid_cols 24
 
   @default_key "desktop"
 
@@ -39,7 +47,6 @@ defmodule PhoenixKitDashboards.Breakpoints do
           label: String.t(),
           min_width: non_neg_integer(),
           cols: pos_integer(),
-          preview_width: pos_integer(),
           max_rows: pos_integer()
         }
 
@@ -88,16 +95,18 @@ defmodule PhoenixKitDashboards.Breakpoints do
     end
   end
 
-  @max_cols @breakpoints |> Enum.map(& &1.cols) |> Enum.max()
-
   @doc """
-  The largest tier's column count — the widest any widget span can be. Size
-  bounds are sanitized against this (not a hardcoded 12) so a widget can span a
-  full TV row; each breakpoint still clamps spans to its own `cols/1` at
-  placement time.
+  The design-space canvas width for a column count — constant cell size, so the
+  widget contract's density never changes; the fit-scaler handles the screen.
   """
-  @spec max_cols() :: pos_integer()
-  def max_cols, do: @max_cols
+  @spec design_width(pos_integer()) :: pos_integer()
+  def design_width(cols) when is_integer(cols) and cols > 0 do
+    cols * (@design_cell_w + @design_gap) - @design_gap
+  end
+
+  @doc "Hard upper bound for per-dashboard column counts and widget spans."
+  @spec max_grid_cols() :: pos_integer()
+  def max_grid_cols, do: @max_grid_cols
 
   @doc "Whether a string is a known breakpoint key."
   @spec valid?(term()) :: boolean()
