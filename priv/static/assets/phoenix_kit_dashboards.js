@@ -1208,10 +1208,14 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         sx = sy = Math.min(sx, sy);
       }
 
-      canvas.style.transformOrigin = "top left";
-      canvas.style.transform = "scale(" + sx + ", " + sy + ")";
+      // NATIVE sizing, no transform: the grid re-lays-out at the fitted size,
+      // so text and SVG (the analog clock!) render undistorted and crisp —
+      // only the CELL RECTANGLES go imperceptibly non-square in stretch mode.
+      canvas.style.transform = "";
+      canvas.style.width = designW * sx + "px";
+      canvas.style.height = designH * sy + "px";
 
-      // The spacer carries the scaled dims; the flex-centered pane positions it.
+      // The spacer carries the fitted dims; the flex-centered pane positions it.
       spacer.style.width = designW * sx + "px";
       spacer.style.height = designH * sy + "px";
       canvas.style.opacity = "1";

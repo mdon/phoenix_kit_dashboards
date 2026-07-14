@@ -155,11 +155,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       {:ok, view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
       refute html =~ "radial-gradient"
 
-      # Guides are a CSS dot lattice at the exact 25px cell pitch — zero extra
-      # DOM (per-cell divs would be thousands of nodes on the fine lattice).
+      # Guides are a CSS dot lattice pitched in box fractions, so they track
+      # the FITTED cell size — zero extra DOM (per-cell divs would be
+      # thousands of nodes on the fine lattice).
       on_html = render_click(view, "toggle_grid_lines", %{})
       assert on_html =~ "radial-gradient"
-      assert on_html =~ "background-size: 25px 25px"
+      assert on_html =~ "background-size: calc(100% / 64) calc(100% / 36)"
 
       refute render_click(view, "toggle_grid_lines", %{}) =~ "radial-gradient"
     end

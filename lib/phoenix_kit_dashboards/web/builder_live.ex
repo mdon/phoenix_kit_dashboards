@@ -890,48 +890,90 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         </button>
       </div>
 
-      <%!-- Actions for the ACTIVE layout. --%>
+      <%!-- Settings for the ACTIVE layout: rename/delete plus its grid size
+      and the Fit-screen action — dimension controls live here, out of the
+      bar (they're a deliberate per-layout setting, not a view control). --%>
       <div class="dropdown dropdown-end shrink-0">
         <button
           type="button"
           tabindex="0"
           class="btn btn-ghost btn-xs btn-square"
-          aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Layout actions")}
+          title={Gettext.gettext(PhoenixKitWeb.Gettext, "Layout settings")}
+          aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Layout settings")}
         >
-          <.icon name="hero-ellipsis-horizontal" class="w-4 h-4" />
+          <.icon name="hero-cog-6-tooth" class="w-4 h-4" />
         </button>
-        <ul
-          tabindex="0"
-          class="dropdown-content menu z-30 w-44 rounded-box bg-base-100 p-2 shadow"
-        >
-          <li>
-            <button type="button" phx-click="start_rename_layout" phx-value-id={@active_layout}>
-              <.icon name="hero-pencil" class="w-3.5 h-3.5" />
-              {Gettext.gettext(PhoenixKitWeb.Gettext, "Rename")}
-            </button>
-          </li>
-          <li :if={length(@entries) > 1}>
-            <button
-              type="button"
-              phx-click="delete_layout"
-              phx-value-id={@active_layout}
-              data-confirm={
-                Gettext.gettext(
-                  PhoenixKitWeb.Gettext,
-                  "Delete this layout? Its placements are removed; the widgets stay available in the other layouts."
-                )
-              }
-              class="text-error"
-            >
-              <.icon name="hero-trash" class="w-3.5 h-3.5" />
-              {Gettext.gettext(PhoenixKitWeb.Gettext, "Delete")}
-            </button>
-          </li>
-        </ul>
+        <div tabindex="0" class="dropdown-content z-30 w-64 rounded-box bg-base-100 p-2 shadow">
+          <ul class="menu p-0">
+            <li>
+              <button type="button" phx-click="start_rename_layout" phx-value-id={@active_layout}>
+                <.icon name="hero-pencil" class="w-3.5 h-3.5" />
+                {Gettext.gettext(PhoenixKitWeb.Gettext, "Rename")}
+              </button>
+            </li>
+            <li :if={length(@entries) > 1}>
+              <button
+                type="button"
+                phx-click="delete_layout"
+                phx-value-id={@active_layout}
+                data-confirm={
+                  Gettext.gettext(
+                    PhoenixKitWeb.Gettext,
+                    "Delete this layout? Its placements are removed; the widgets stay available in the other layouts."
+                  )
+                }
+                class="text-error"
+              >
+                <.icon name="hero-trash" class="w-3.5 h-3.5" />
+                {Gettext.gettext(PhoenixKitWeb.Gettext, "Delete")}
+              </button>
+            </li>
+          </ul>
+
+          <div class="divider my-1"></div>
+
+          <div class="px-1 pb-1.5 text-xs font-medium text-base-content/50">
+            {Gettext.gettext(PhoenixKitWeb.Gettext, "Grid size (columns × rows)")}
+          </div>
+          <form id="grid-dims" phx-change="set_dims" class="flex items-center gap-2 px-1">
+            <input
+              type="number"
+              name="cols"
+              value={Dashboards.grid_cols(@dashboard, @active_layout)}
+              min={Lattice.min_dim()}
+              max={Lattice.max_dim()}
+              class="input input-sm w-20 text-center tabular-nums"
+              aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Columns")}
+            />
+            <span class="text-base-content/40">×</span>
+            <input
+              type="number"
+              name="rows"
+              value={Dashboards.grid_rows(@dashboard, @active_layout)}
+              min={Lattice.min_dim()}
+              max={Lattice.max_dim()}
+              class="input input-sm w-20 text-center tabular-nums"
+              aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Rows")}
+            />
+          </form>
+          <button
+            id="dashboard-fit-screen"
+            type="button"
+            phx-hook="DashboardFitScreen"
+            class="btn btn-ghost btn-sm mt-1.5 w-full justify-start gap-2"
+            title={
+              Gettext.gettext(
+                PhoenixKitWeb.Gettext,
+                "Resize this layout's grid to match the screen you're viewing on"
+              )
+            }
+          >
+            <.icon name="hero-viewfinder-circle" class="w-4 h-4" />
+            {Gettext.gettext(PhoenixKitWeb.Gettext, "Fit this screen")}
+          </button>
+        </div>
       </div>
 
-      <%!-- Per-layout lattice dimensions — one screenful. Type exact numbers
-      or hit "Fit screen" to match the display you're standing at. --%>
       <div class="ml-auto flex items-center gap-3">
         <label class="flex cursor-pointer items-center gap-1.5">
           <span class="text-xs font-medium text-base-content/50">
@@ -944,45 +986,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
             checked={@show_grid_lines}
           />
         </label>
-        <form id="grid-dims" phx-change="set_dims" class="flex items-center gap-1">
-          <span class="text-xs font-medium text-base-content/50">
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "Grid")}
-          </span>
-          <input
-            type="number"
-            name="cols"
-            value={Dashboards.grid_cols(@dashboard, @active_layout)}
-            min={Lattice.min_dim()}
-            max={Lattice.max_dim()}
-            class="input input-xs w-14 tabular-nums"
-            aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Columns")}
-          />
-          <span class="text-xs text-base-content/40">×</span>
-          <input
-            type="number"
-            name="rows"
-            value={Dashboards.grid_rows(@dashboard, @active_layout)}
-            min={Lattice.min_dim()}
-            max={Lattice.max_dim()}
-            class="input input-xs w-14 tabular-nums"
-            aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Rows")}
-          />
-        </form>
-        <button
-          id="dashboard-fit-screen"
-          type="button"
-          phx-hook="DashboardFitScreen"
-          class="btn btn-ghost btn-xs gap-1"
-          title={
-            Gettext.gettext(
-              PhoenixKitWeb.Gettext,
-              "Size this layout to the screen you're viewing on"
-            )
-          }
-        >
-          <.icon name="hero-viewfinder-circle" class="w-3.5 h-3.5" />
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "Fit screen")}
-        </button>
       </div>
     </div>
     """
@@ -1097,13 +1100,15 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         "grid-template-rows: repeat(#{rows}, minmax(0, 1fr));"
 
     if show_grid_lines do
-      # A dot at each cell corner, not hairlines — at 25px pitch full lines
-      # read as graph paper and moiré under the fit transform; dots stay calm.
+      # A dot at each cell corner, not hairlines — at this pitch full lines
+      # read as graph paper; dots stay calm. Pitch in fractions of the box,
+      # so the guides track the FITTED cell size exactly (the fit hook sizes
+      # the canvas natively — cells are only nominally 25px).
       dot = "color-mix(in oklab, var(--color-base-content) 9%, transparent)"
 
       base <>
         " background-image: radial-gradient(circle at 1px 1px, #{dot} 1px, transparent 1.4px);" <>
-        " background-size: #{Lattice.cell()}px #{Lattice.cell()}px;"
+        " background-size: calc(100% / #{cols}) calc(100% / #{rows});"
     else
       base
     end
