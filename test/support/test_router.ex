@@ -27,6 +27,10 @@ defmodule PhoenixKitDashboards.Test.Router do
       layout: {PhoenixKitDashboards.Test.Layouts, :app},
       on_mount: {PhoenixKitDashboards.Test.Hooks, :assign_scope} do
       live("/", DashboardsLive, :index)
+      # Static /new MUST precede the dynamic /:uuid, mirroring the declaration
+      # order of the module's admin tabs.
+      live("/new", DashboardFormLive, :new)
+      live("/:uuid/edit", DashboardFormLive, :edit)
       # BuilderLive keys on handle_params(%{"uuid" => uuid}, ...).
       live("/:uuid", BuilderLive, :edit)
     end

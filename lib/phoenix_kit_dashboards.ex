@@ -105,14 +105,38 @@ defmodule PhoenixKitDashboards do
         group: :admin_modules,
         live_view: {PhoenixKitDashboards.Web.DashboardsLive, :index}
       },
-      # Hidden tab: the per-dashboard builder. Not shown in the sidebar; reached
-      # by navigating from the list. Dynamic :uuid segment is spliced verbatim
+      # Hidden tabs. Routes are generated in declaration order, so the static
+      # "dashboards/new" MUST come before the dynamic "dashboards/:uuid" or the
+      # builder route would swallow it.
+      %Tab{
+        id: :admin_dashboards_new,
+        label: "New Dashboard",
+        path: "dashboards/new",
+        priority: 651,
+        level: :admin,
+        permission: @module_key,
+        parent: :admin_dashboards,
+        visible: false,
+        live_view: {PhoenixKitDashboards.Web.DashboardFormLive, :new}
+      },
+      %Tab{
+        id: :admin_dashboards_edit,
+        label: "Dashboard Settings",
+        path: "dashboards/:uuid/edit",
+        priority: 652,
+        level: :admin,
+        permission: @module_key,
+        parent: :admin_dashboards,
+        visible: false,
+        live_view: {PhoenixKitDashboards.Web.DashboardFormLive, :edit}
+      },
+      # The per-dashboard builder. Dynamic :uuid segment is spliced verbatim
       # into the generated route.
       %Tab{
         id: :admin_dashboards_builder,
         label: "Dashboard Builder",
         path: "dashboards/:uuid",
-        priority: 651,
+        priority: 653,
         level: :admin,
         permission: @module_key,
         parent: :admin_dashboards,

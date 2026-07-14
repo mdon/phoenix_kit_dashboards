@@ -17,4 +17,12 @@ defmodule PhoenixKitDashboards.Paths do
   @doc "The builder/editor for a single dashboard."
   @spec builder(String.t()) :: String.t()
   def builder(uuid), do: Routes.path("#{@base}/#{uuid}")
+
+  @doc "The create-dashboard page."
+  @spec new() :: String.t()
+  def new, do: Routes.path("#{@base}/new")
+
+  @doc "The settings/edit page for a single dashboard."
+  @spec edit(String.t()) :: String.t()
+  def edit(uuid), do: Routes.path("#{@base}/#{uuid}/edit")
 end

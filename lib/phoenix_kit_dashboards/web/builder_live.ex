@@ -290,6 +290,43 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end
   end
 
+  # Grow/shrink the active tier's grid by one column or row (the Layout bar's
+  # +/- controls). Shrinking under a placed widget is refused with a flash.
+  @impl true
+  def handle_event("grid_dim", %{"dim" => dim, "delta" => delta}, socket) do
+    with {:ok, dim} <- Map.fetch(%{"cols" => :cols, "rows" => :rows}, dim),
+         d when d in [-1, 1] <- to_i(delta) do
+      case Dashboards.resize_grid(socket.assigns.dashboard, socket.assigns.active_bp, dim, d) do
+        {:ok, dashboard} ->
+          {:noreply, assign(socket, :dashboard, dashboard)}
+
+        {:error, :occupied} ->
+          msg =
+            case dim do
+              :cols ->
+                Gettext.gettext(
+                  PhoenixKitWeb.Gettext,
+                  "Cannot remove the column — a widget still occupies it."
+                )
+
+              :rows ->
+                Gettext.gettext(
+                  PhoenixKitWeb.Gettext,
+                  "Cannot remove the row — a widget still occupies it."
+                )
+            end
+
+          {:noreply, put_flash(socket, :error, msg)}
+
+        {:error, _} ->
+          {:noreply, socket}
+      end
+    else
+      # Crafted/malformed payloads are ignored.
+      _ -> {:noreply, socket}
+    end
+  end
+
   # Reset the active breakpoint to auto (re-derive from a larger one).
   @impl true
   def handle_event("reset_bp", _params, socket) do
@@ -649,6 +686,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           </.link>
           <h1 class="text-lg font-semibold">{@dashboard.title}</h1>
           <span class="badge badge-ghost badge-sm">{scope_label(@dashboard.scope)}</span>
+          <.link
+            navigate={Paths.edit(@dashboard.uuid)}
+            class="btn btn-ghost btn-xs btn-square"
+            title={Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard settings")}
+          >
+            <.icon name="hero-pencil" class="w-3.5 h-3.5" />
+          </.link>
         </div>
         <div class="flex items-center gap-2">
           <button
@@ -696,6 +740,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         mode={Dashboard.layout_mode(@dashboard)}
         active_bp={@active_bp}
         grid_placement={Dashboards.resolve_placement(@dashboard, @settings_instance, @active_bp)}
+        cols={Dashboards.grid_cols(@dashboard, @active_bp)}
+        max_rows={Dashboards.grid_rows(@dashboard, @active_bp)}
       />
     </div>
     """
@@ -808,6 +854,56 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         {Gettext.gettext(PhoenixKitWeb.Gettext, "Reset")}
       </button>
 
+      <%!-- Per-tier grid dimensions. Columns always FIT horizontally (the grid
+      is laid out at the tier design width and fit-scaled — more columns just
+      means narrower cells); extra rows extend downward and the pane scrolls. --%>
+      <div class="ml-auto flex items-center gap-3">
+        <.dim_control
+          label={Gettext.gettext(PhoenixKitWeb.Gettext, "Columns")}
+          dim="cols"
+          value={Dashboards.grid_cols(@dashboard, @active_bp)}
+        />
+        <.dim_control
+          label={Gettext.gettext(PhoenixKitWeb.Gettext, "Rows")}
+          dim="rows"
+          value={Dashboards.grid_rows(@dashboard, @active_bp)}
+        />
+      </div>
+    </div>
+    """
+  end
+
+  attr(:label, :string, required: true)
+  attr(:dim, :string, required: true)
+  attr(:value, :integer, required: true)
+
+  defp dim_control(assigns) do
+    ~H"""
+    <div class="flex items-center gap-1">
+      <span class="text-xs font-medium text-base-content/50">{@label}</span>
+      <div class="join">
+        <button
+          type="button"
+          phx-click="grid_dim"
+          phx-value-dim={@dim}
+          phx-value-delta="-1"
+          class="join-item btn btn-xs btn-square"
+          title={Gettext.gettext(PhoenixKitWeb.Gettext, "Remove one")}
+        >
+          <.icon name="hero-minus" class="w-3 h-3" />
+        </button>
+        <span class="join-item btn btn-xs pointer-events-none w-8 tabular-nums">{@value}</span>
+        <button
+          type="button"
+          phx-click="grid_dim"
+          phx-value-dim={@dim}
+          phx-value-delta="1"
+          class="join-item btn btn-xs btn-square"
+          title={Gettext.gettext(PhoenixKitWeb.Gettext, "Add one")}
+        >
+          <.icon name="hero-plus" class="w-3 h-3" />
+        </button>
+      </div>
     </div>
     """
   end
@@ -828,7 +924,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     assigns =
       assign(assigns,
         items: Dashboards.resolve_items(assigns.dashboard, assigns.active_bp),
-        cols: bp.cols,
+        cols: Dashboards.grid_cols(assigns.dashboard, assigns.active_bp),
+        rows: Dashboards.grid_rows(assigns.dashboard, assigns.active_bp),
         preview_width: bp.preview_width,
         bp_label: bp_label(bp.key)
       )
@@ -868,9 +965,9 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
               id="dashboard-grid"
               phx-hook="DashboardGridDrag"
               data-cols={@cols}
-              data-max-rows={Breakpoints.max_rows(@active_bp)}
+              data-max-rows={@rows}
               class="relative grid auto-rows-[8rem] content-start gap-3"
-              style={"grid-template-columns: repeat(#{@cols}, minmax(0, 1fr));"}
+              style={"grid-template-columns: repeat(#{@cols}, minmax(0, 1fr)); min-height: calc(#{@rows} * 8rem + #{@rows - 1} * 0.75rem);"}
             >
               <.widget_card
                 :for={{inst, placement} <- @items}
@@ -879,6 +976,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 scope={@scope}
                 mode="grid"
                 active_bp={@active_bp}
+                cols={@cols}
               />
             </div>
           </div>
@@ -947,6 +1045,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   attr(:mode, :string, required: true)
   attr(:placement, :map, default: nil)
   attr(:active_bp, :string, default: nil)
+  attr(:cols, :integer, default: nil)
 
   defp widget_card(assigns) do
     assigns =
@@ -1057,9 +1156,9 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # Resize bounds fed to the DashboardResize hook (as data-*). Grid: the resolved
   # placement span + the widget type's min/max clamped to the active breakpoint's
   # columns. Pixel: the default-bp span (unused by the pixel resize, which uses px).
-  defp card_limits(%{mode: "grid", inst: inst, placement: placement, active_bp: bp}) do
+  defp card_limits(%{mode: "grid", inst: inst, placement: placement, active_bp: bp, cols: cols}) do
     {min, max} = widget_size_bounds(inst)
-    cols = Breakpoints.cols(bp)
+    cols = cols || Breakpoints.cols(bp)
     p = placement || %{}
 
     %{
@@ -1080,9 +1179,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   # Span limits for an instance at a breakpoint (defaulting to the default tier),
   # clamped to that tier's column count — the settings modal passes the active
-  # tier so its W input allows a full row there (e.g. 16 on TV, 4 on Phone).
-  defp size_limits(inst, bp \\ Breakpoints.default()) do
-    cols = Breakpoints.cols(bp)
+  # tier (and its dashboard-resolved column count) so its W input allows a full
+  # row there.
+  defp size_limits(inst, bp \\ Breakpoints.default(), cols \\ nil) do
+    cols = cols || Breakpoints.cols(bp)
     p = Layout.placement(inst, bp)
     w = p["w"] |> to_int(4) |> clamp(1, cols)
     h = p["h"] |> to_int(2) |> max(1)
@@ -1338,6 +1438,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   attr(:mode, :string, required: true)
   attr(:active_bp, :string, required: true)
   attr(:grid_placement, :map, default: nil)
+  attr(:cols, :integer, required: true)
+  attr(:max_rows, :integer, required: true)
 
   defp settings_modal(assigns) do
     widget = Registry.get(assigns.instance["widget_key"])
@@ -1350,7 +1452,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     assigns =
       assign(assigns,
         widget: widget,
-        limits: size_limits(assigns.instance, assigns.active_bp),
+        limits: size_limits(assigns.instance, assigns.active_bp, assigns.cols),
         free?: assigns.mode == "free",
         free_min_px: @free_min_px,
         free_max_px: @free_max_px,
@@ -1362,9 +1464,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         grid_h: grid["h"],
         # 1-based for the form; the placement stores 0-based cells.
         grid_x: (grid["x"] || 0) + 1,
-        grid_y: (grid["y"] || 0) + 1,
-        cols: Breakpoints.cols(assigns.active_bp),
-        max_rows: Breakpoints.max_rows(assigns.active_bp)
+        grid_y: (grid["y"] || 0) + 1
       )
 
     ~H"""

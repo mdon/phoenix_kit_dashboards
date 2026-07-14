@@ -23,6 +23,9 @@ defmodule PhoenixKitDashboards.Dashboards do
   # Free/pixel-canvas widget size bounds (px).
   @free_min_px 60
   @free_max_px 4000
+  # Per-dashboard grid dimension bounds. Columns cap above the largest tier
+  # default (16) for finer granularity; rows cap at the hard placement bound.
+  @max_grid_cols 24
   # px per grid col/row when seeding a new widget's pixel geometry from its span.
   @pixel_seed_col 120
   @pixel_seed_row 140
@@ -263,11 +266,11 @@ defmodule PhoenixKitDashboards.Dashboards do
       %Widget{} = widget ->
         # Pin the tier first so placing the new widget can't shift the others.
         dashboard = materialize_grid(dashboard, bp)
-        cols = Breakpoints.cols(bp)
+        cols = grid_cols(dashboard, bp)
         w = min(widget.default_size.w, cols)
         h = widget.default_size.h
         x = clamp(x, 0, max(cols - w, 0))
-        y = clamp(y, 0, max(Breakpoints.max_rows(bp) - h, 0))
+        y = clamp(y, 0, max(grid_rows(dashboard, bp) - h, 0))
         others = Enum.map(dashboard.layout, &Layout.placement(&1, bp))
 
         if Grid.collides?(x, y, w, h, others) do
@@ -323,7 +326,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   # the seed span must already fit its columns).
   defp new_instance(dashboard, %Widget{} = widget) do
     home = home_bp(dashboard)
-    cols = Breakpoints.cols(home)
+    cols = grid_cols(dashboard, home)
     w = widget.default_size.w
     h = widget.default_size.h
     seed_w = min(w, cols)
@@ -367,7 +370,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   def reorder_widgets(%Dashboard{} = dashboard, bp, ordered_ids)
       when is_binary(bp) and is_list(ordered_ids) do
     dashboard = materialize_grid(dashboard, bp)
-    cols = Breakpoints.cols(bp)
+    cols = grid_cols(dashboard, bp)
 
     order =
       ordered_ids |> Enum.filter(&is_binary/1) |> Enum.uniq() |> Enum.with_index() |> Map.new()
@@ -426,12 +429,12 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   defp place_at_cell(dashboard, item, instance_id, bp, x, y) do
-    cols = Breakpoints.cols(bp)
+    cols = grid_cols(dashboard, bp)
     placement = Layout.placement(item, bp)
     w = min(placement["w"], cols)
     h = placement["h"]
     x = clamp(x, 0, max(cols - w, 0))
-    y = clamp(y, 0, max(Breakpoints.max_rows(bp) - h, 0))
+    y = clamp(y, 0, max(grid_rows(dashboard, bp) - h, 0))
 
     others =
       dashboard.layout
@@ -471,7 +474,7 @@ defmodule PhoenixKitDashboards.Dashboards do
           {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
   def resize_widget(%Dashboard{} = dashboard, instance_id, bp, w, h) when is_binary(bp) do
     dashboard = materialize_grid(dashboard, bp)
-    cols = Breakpoints.cols(bp)
+    cols = grid_cols(dashboard, bp)
 
     others =
       dashboard.layout
@@ -536,9 +539,93 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   @doc """
+  The grid column count for a dashboard at `bp` — the per-dashboard override
+  (`config["breakpoints"][bp]["cols"]`, set by the builder's +/- controls) or
+  the tier default. All placement math and rendering go through this so a
+  resized grid stays consistent everywhere.
+  """
+  @spec grid_cols(Dashboard.t(), String.t()) :: pos_integer()
+  def grid_cols(%Dashboard{} = dashboard, bp) do
+    dim_override(dashboard, bp, "cols", 1, @max_grid_cols) || Breakpoints.cols(bp)
+  end
+
+  @doc """
+  The designable grid rows for a dashboard at `bp` — the per-dashboard override
+  (`config["breakpoints"][bp]["rows"]`) or the tier default. Rows only bound
+  MANUAL placement and the rendered surface; the pane scrolls vertically.
+  """
+  @spec grid_rows(Dashboard.t(), String.t()) :: pos_integer()
+  def grid_rows(%Dashboard{} = dashboard, bp) do
+    dim_override(dashboard, bp, "rows", 1, Grid.max_rows()) || Breakpoints.max_rows(bp)
+  end
+
+  defp dim_override(dashboard, bp, key, lo, hi) do
+    case get_in(dashboard.config, ["breakpoints", bp, key]) do
+      n when is_integer(n) and n >= lo and n <= hi -> n
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Grow/shrink the grid by one column or row on `bp` (the builder's +/- header
+  controls). Shrinking is refused with `{:error, :occupied}` while any widget
+  occupies the column/row being removed — move the widget first. Columns are
+  bounded to `1..#{@max_grid_cols}`, rows to `1..#{Grid.max_rows()}` (the hard
+  placement bound). Marks the breakpoint customized (a grid dimension is a
+  design decision for that tier). A layout tweak — not activity-logged.
+  """
+  @spec resize_grid(Dashboard.t(), String.t(), :cols | :rows, integer()) ::
+          {:ok, Dashboard.t()} | {:error, :occupied | Ecto.Changeset.t()}
+  def resize_grid(%Dashboard{} = dashboard, bp, dim, delta)
+      when is_binary(bp) and dim in [:cols, :rows] and delta in [-1, 1] do
+    {current, hi} =
+      case dim do
+        :cols -> {grid_cols(dashboard, bp), @max_grid_cols}
+        :rows -> {grid_rows(dashboard, bp), Grid.max_rows()}
+      end
+
+    target = clamp(current + delta, 1, hi)
+
+    cond do
+      target == current ->
+        {:ok, dashboard}
+
+      delta < 0 and dim_occupied?(dashboard, bp, dim, target) ->
+        {:error, :occupied}
+
+      true ->
+        # Pin resolved placements first so a dimension change can't reshuffle
+        # widgets (a shrunken derived tier would otherwise re-derive).
+        dashboard = materialize_grid(dashboard, bp)
+        key = if dim == :cols, do: "cols", else: "rows"
+        bps = Map.get(dashboard.config, "breakpoints", %{})
+        bp_map = bps |> Map.get(bp, %{}) |> Map.put(key, target) |> Map.put("state", "custom")
+        config = Map.put(dashboard.config, "breakpoints", Map.put(bps, bp, bp_map))
+
+        dashboard
+        |> Ecto.Changeset.change(config: config)
+        |> Ecto.Changeset.force_change(:layout, dashboard.layout)
+        |> repo().update()
+    end
+  end
+
+  # Would shrinking to `target` cols/rows cut into any resolved placement?
+  # (Hidden widgets keep their cells, so they count too.)
+  defp dim_occupied?(dashboard, bp, dim, target) do
+    dashboard
+    |> resolve_items(bp)
+    |> Enum.any?(fn {_item, p} ->
+      case dim do
+        :cols -> is_integer(p["x"]) and p["x"] + (p["w"] || 1) > target
+        :rows -> is_integer(p["y"]) and p["y"] + (p["h"] || 1) > target
+      end
+    end)
+  end
+
+  @doc """
   Reset a breakpoint to auto — drops its stored per-widget placements + custom
-  flag so it re-derives from the home tier. The home tier (the design anchor)
-  can't be reset. Not activity-logged.
+  flag (and any grid dimension overrides) so it re-derives from the home tier.
+  The home tier (the design anchor) can't be reset. Not activity-logged.
   """
   @spec reset_breakpoint(Dashboard.t(), String.t()) ::
           {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
@@ -796,7 +883,7 @@ defmodule PhoenixKitDashboards.Dashboards do
 
     layout =
       if Map.has_key?(attrs, :view),
-        do: grow_for_view(layout, instance_id),
+        do: grow_for_view(dashboard, layout, instance_id),
         else: layout
 
     dashboard
@@ -815,24 +902,29 @@ defmodule PhoenixKitDashboards.Dashboards do
   # every stored placement of that instance to meet it — per tier, and only
   # where the grid has room: a blocked or edge-tight tier keeps its size (the
   # view still renders, just smaller than its ideal floor).
-  defp grow_for_view(layout, instance_id) do
+  defp grow_for_view(dashboard, layout, instance_id) do
     case Enum.find(layout, &(&1["id"] == instance_id)) do
       nil -> layout
-      item -> swap_item(layout, instance_id, grow_all_tiers(item, layout))
+      item -> swap_item(layout, instance_id, grow_all_tiers(dashboard, item, layout))
     end
   end
 
-  defp grow_all_tiers(item, layout) do
+  defp grow_all_tiers(dashboard, item, layout) do
     {min, _max} = size_bounds(item)
-    Enum.reduce(Map.keys(item["bp"] || %{}), item, &grow_on_tier(&2, &1, min, layout))
+
+    Enum.reduce(
+      Map.keys(item["bp"] || %{}),
+      item,
+      &grow_on_tier(dashboard, &2, &1, min, layout)
+    )
   end
 
   defp swap_item(layout, instance_id, replacement) do
     Enum.map(layout, fn i -> if i["id"] == instance_id, do: replacement, else: i end)
   end
 
-  defp grow_on_tier(item, bp, min, layout) do
-    cols = Breakpoints.cols(bp)
+  defp grow_on_tier(dashboard, item, bp, min, layout) do
+    cols = grid_cols(dashboard, bp)
     p = Layout.placement(item, bp)
     w = max(p["w"], min(min.w, cols))
     h = max(p["h"], min.h)
@@ -847,7 +939,7 @@ defmodule PhoenixKitDashboards.Dashboards do
           |> Enum.reject(&(&1["id"] == item["id"]))
           |> Enum.map(&Layout.placement(&1, bp))
 
-        if p["x"] + w <= cols and p["y"] + h <= Breakpoints.max_rows(bp) and
+        if p["x"] + w <= cols and p["y"] + h <= grid_rows(dashboard, bp) and
              not Grid.collides?(p["x"], p["y"], w, h, others) do
           Layout.put_placement(item, bp, %{"w" => w, "h" => h})
         else
@@ -890,16 +982,19 @@ defmodule PhoenixKitDashboards.Dashboards do
     |> repo().update()
   end
 
+  # Merge (not replace) the tier map: it may carry "cols"/"rows" overrides that
+  # a plain %{"state" => "custom"} write would wipe.
   defp mark_customized(config, bp) do
     bps = Map.get(config, "breakpoints", %{})
-    Map.put(config, "breakpoints", Map.put(bps, bp, %{"state" => "custom"}))
+    bp_map = bps |> Map.get(bp, %{}) |> Map.put("state", "custom")
+    Map.put(config, "breakpoints", Map.put(bps, bp, bp_map))
   end
 
   # A designed breakpoint: stored explicit cells render verbatim; order-only
   # placements (pre-cells data, or none at all) pack into the remaining free
   # cells in `pos` order. Reading-order output.
   defp resolve_designed(dashboard, bp) do
-    cols = Breakpoints.cols(bp)
+    cols = grid_cols(dashboard, bp)
 
     entries =
       dashboard.layout
@@ -932,7 +1027,7 @@ defmodule PhoenixKitDashboards.Dashboards do
     source_items = resolve_items(dashboard, derivation_source(dashboard, bp))
 
     packed =
-      source_items |> Enum.map(fn {_item, p} -> p end) |> Grid.compact(Breakpoints.cols(bp))
+      source_items |> Enum.map(fn {_item, p} -> p end) |> Grid.compact(grid_cols(dashboard, bp))
 
     source_items
     |> Enum.zip(packed)

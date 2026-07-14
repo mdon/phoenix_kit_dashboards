@@ -462,6 +462,94 @@ defmodule PhoenixKitDashboards.DashboardsTest do
     end
   end
 
+  describe "grid dimensions (resize_grid/4)" do
+    setup do
+      {:ok, d0} = Dashboards.create(%{title: "Dims", scope: "system"})
+      {:ok, dashboard} = Dashboards.add_widget(d0, "core.note")
+      %{dashboard: dashboard}
+    end
+
+    test "defaults come from the tier", %{dashboard: d} do
+      assert Dashboards.grid_cols(d, "desktop") == 12
+      assert Dashboards.grid_cols(d, "phone") == 4
+      assert Dashboards.grid_rows(d, "desktop") == 15
+      assert Dashboards.grid_rows(d, "tv") == 8
+    end
+
+    test "adding a column/row stores a per-tier override, persists, and marks customized", %{
+      dashboard: d
+    } do
+      assert {:ok, d1} = Dashboards.resize_grid(d, "desktop", :cols, 1)
+      assert Dashboards.grid_cols(d1, "desktop") == 13
+      # Other tiers keep their defaults.
+      assert Dashboards.grid_cols(d1, "phone") == 4
+      assert Dashboards.customized?(d1, "desktop")
+
+      assert {:ok, d2} = Dashboards.resize_grid(d1, "desktop", :rows, 1)
+      assert Dashboards.grid_rows(d2, "desktop") == 16
+
+      # Persisted, not just in the returned struct.
+      reloaded = Dashboards.get(d.uuid)
+      assert Dashboards.grid_cols(reloaded, "desktop") == 13
+      assert Dashboards.grid_rows(reloaded, "desktop") == 16
+    end
+
+    test "a later per-widget edit keeps the dimension override (merge, not replace)", %{
+      dashboard: d
+    } do
+      {:ok, d1} = Dashboards.resize_grid(d, "desktop", :cols, 1)
+      [%{"id" => id}] = d1.layout
+      # A placement edit runs mark_customized on the same tier map.
+      {:ok, d2} = Dashboards.place_widget_grid(d1, id, "desktop", 2, 2)
+      assert Dashboards.grid_cols(d2, "desktop") == 13
+    end
+
+    test "shrinking under a placed widget is refused; free dims shrink fine", %{dashboard: d} do
+      [%{"id" => id}] = d.layout
+      # Park the 4x2 note at the right edge of the 12-col desktop grid (x=8).
+      {:ok, d1} = Dashboards.place_widget_grid(d, id, "desktop", 8, 0)
+      assert {:error, :occupied} = Dashboards.resize_grid(d1, "desktop", :cols, -1)
+
+      # Row 0-1 occupied; shrinking rows from 15 down is fine until 2.
+      assert {:ok, d2} = Dashboards.resize_grid(d1, "desktop", :rows, -1)
+      assert Dashboards.grid_rows(d2, "desktop") == 14
+
+      # Move the widget away and the column shrink goes through.
+      {:ok, d3} = Dashboards.place_widget_grid(d2, id, "desktop", 0, 0)
+      assert {:ok, d4} = Dashboards.resize_grid(d3, "desktop", :cols, -1)
+      assert Dashboards.grid_cols(d4, "desktop") == 11
+    end
+
+    test "bounds clamp: cols never exceed 24 or drop below 1", %{dashboard: d} do
+      # Grow to the cap...
+      d_max =
+        Enum.reduce(1..20, d, fn _, acc ->
+          {:ok, acc} = Dashboards.resize_grid(acc, "desktop", :cols, 1)
+          acc
+        end)
+
+      assert Dashboards.grid_cols(d_max, "desktop") == 24
+      # ...and the next + is a no-op, not an error.
+      assert {:ok, same} = Dashboards.resize_grid(d_max, "desktop", :cols, 1)
+      assert Dashboards.grid_cols(same, "desktop") == 24
+    end
+
+    test "placement math honors a widened grid", %{dashboard: d} do
+      [%{"id" => id}] = d.layout
+      {:ok, d1} = Dashboards.resize_grid(d, "desktop", :cols, 1)
+      # x=9 with w=4 fits on a 13-col grid (9+4=13) but not the default 12.
+      assert {:ok, placed} = Dashboards.place_widget_grid(d1, id, "desktop", 9, 0)
+      assert %{"x" => 9} = Layout.placement(hd(placed.layout), "desktop")
+    end
+
+    test "reset_breakpoint clears dimension overrides on a non-home tier", %{dashboard: d} do
+      {:ok, d1} = Dashboards.resize_grid(d, "phone", :cols, 1)
+      assert Dashboards.grid_cols(d1, "phone") == 5
+      {:ok, d2} = Dashboards.reset_breakpoint(d1, "phone")
+      assert Dashboards.grid_cols(d2, "phone") == 4
+    end
+  end
+
   describe "widget views" do
     test "add_widget seeds the widget type's default view" do
       {:ok, d0} = Dashboards.create(%{title: "V", scope: "system"})
