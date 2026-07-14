@@ -28,12 +28,13 @@ defmodule PhoenixKitDashboards.Breakpoints do
     %{key: "phone", label: "Phone", min_width: 0, cols: 4, max_rows: 36}
   ]
 
-  # The design-space cell: every grid lays out at this cell width regardless of
-  # column count (12 cols -> the classic 1200px desktop canvas). The gap must
-  # match the builder grid's gap-3 (0.75rem = 12px); row height is the grid's
-  # auto-rows 8rem. Widgets are designed against THIS density — more columns
-  # widen the canvas and the fit hook scales the whole thing down, shrinking
-  # widget contents uniformly so they always keep fitting.
+  # The design-space cell: every grid lays out at this cell size regardless of
+  # column count (12 cols -> the classic 1200px-wide canvas). Cells are SQUARE
+  # (89x89; the builder grid's auto-rows matches this width) with 12px gaps
+  # (gap-3). Widgets are designed against THIS density — more columns widen
+  # the canvas and the fit hook rescales the whole thing (always filling the
+  # pane width), shrinking or growing widget contents uniformly so they
+  # always keep fitting.
   @design_cell_w 89
   @design_gap 12
 

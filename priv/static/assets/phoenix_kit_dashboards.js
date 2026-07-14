@@ -1177,16 +1177,10 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var avail = this.el.clientWidth - pad;
       if (avail <= 0) return;
 
-      // Fill (scale up past 1:1) in fullscreen and on the viewer's NATIVE tier
-      // (data-fill) — a wide monitor shouldn't waste dead margins beside its
-      // own tier's grid. A DIFFERENT tier's preview stays capped at 1:1 so a
-      // phone design isn't blown up comically on a desktop.
-      var fullscreen = document.fullscreenElement && document.fullscreenElement.contains(this.el);
-      var fill = fullscreen || this.el.getAttribute("data-fill") === "true";
-      // Fill is capped at 2x: design width now derives from the column count,
-      // so a low-column board has a narrow canvas — uncapped fill would blow
-      // its widgets up comically on a wide pane.
-      var scale = fill ? Math.min(2, avail / designW) : Math.min(1, avail / designW);
+      // The canvas ALWAYS fills the pane width — up or down, every tier,
+      // fullscreen included. On-screen size is purely pane/design ratio; the
+      // design space keeps its constant cell density.
+      var scale = avail / designW;
 
       canvas.style.transformOrigin = "top left";
       canvas.style.transform = "scale(" + scale + ")";
@@ -1200,7 +1194,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
       if (grid) {
         var gcs = getComputedStyle(grid);
-        var rowH = parseFloat(gcs.gridAutoRows) || 128;
+        var rowH = parseFloat(gcs.gridAutoRows) || 89;
         var rowGap = parseFloat(gcs.rowGap) || 0;
         var maxRows = parseInt(grid.getAttribute("data-max-rows"), 10) || 50;
         surfaceH = maxRows * (rowH + rowGap) - rowGap;

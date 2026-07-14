@@ -143,8 +143,8 @@ without stored `x`/`y` are packed at render and pinned on their first edit).
   (`PhoenixKitDashboards.Breakpoints`, largest→smallest): **TV ≥1920 = 16 cols,
   Desktop ≥1280 = 12, iPad ≥768 = 8, Phone <768 = 4** — a tier is JUST its
   column count + designable rows; there is **no per-tier design width**. The
-  canvas width derives from the column count at a **constant design-space cell
-  (89px wide + 12px gap, rows 8rem)** via `Breakpoints.design_width/1`
+  canvas width derives from the column count at a **constant SQUARE
+  design-space cell (89x89px + 12px gap)** via `Breakpoints.design_width/1`
   (12 cols → the classic 1200px), so the widget contract's density never
   changes: adding columns widens the canvas and `DashboardGridFit` scales the
   whole thing down — widget contents shrink uniformly and always keep fitting.
@@ -153,8 +153,9 @@ without stored `x`/`y` are packed at render and pinned on their first edit).
   `Breakpoints.max_grid_cols/0`, rows 1..50) are honored by every placement/
   render path via `Dashboards.grid_cols/2` + `grid_rows/2`; shrinking under a
   placed widget is refused. Widget span caps sanitize against
-  `max_grid_cols/0` (24). Fill-scaling caps at 2x so low-column boards aren't
-  blown up. A **Show-grid toggle** (session-local) renders the empty cells as
+  `max_grid_cols/0` (24). The canvas ALWAYS scales to fill the pane width —
+  up or down, on every tier (no 1:1 cap, no native-tier special case; the
+  old `data-fill` attribute is gone). A **Show-grid toggle** (session-local) renders the empty cells as
   soft tiles (borderless `bg-base-content/[0.04]`, radius below the cards —
   quorum-picked); the grid surface renders even on an EMPTY board (hint floats
   over it) so the toggle and catalog drag-drop work there.

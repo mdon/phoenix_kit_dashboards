@@ -979,14 +979,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           {Gettext.gettext(PhoenixKitWeb.Gettext, "layout, scaled to fit your screen.")}
         </span>
       </div>
-      <%!-- data-fill: on the viewer's NATIVE tier the grid scales UP past 1:1 to
-      fill the pane (no dead margins on a wide monitor); other tiers' previews
-      stay capped at 1:1. --%>
+      <%!-- The canvas ALWAYS scales to fill the pane width — up or down, on
+      every tier. On-screen size is purely pane-width / design-width; the
+      design space itself is constant-density. --%>
       <div
         id="dashboard-grid-fit"
         phx-hook="DashboardGridFit"
         data-design-width={@preview_width}
-        data-fill={to_string(not @scaled)}
         class="relative flex-1 overflow-auto bg-base-200 p-4"
         style="scrollbar-gutter: stable;"
       >
@@ -1014,8 +1013,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
               phx-hook="DashboardGridDrag"
               data-cols={@cols}
               data-max-rows={@rows}
-              class="relative grid auto-rows-[8rem] content-start gap-3"
-              style={"grid-template-columns: repeat(#{@cols}, minmax(0, 1fr)); min-height: calc(#{@rows} * 8rem + #{@rows - 1} * 0.75rem);"}
+              class="relative grid auto-rows-[89px] content-start gap-3"
+              style={"grid-template-columns: repeat(#{@cols}, minmax(0, 1fr)); min-height: calc(#{@rows} * 89px + #{@rows - 1} * 12px);"}
             >
               <%!-- Optional cell guides: real items in the SAME grid, so gaps and
               strides stay honest with zero duplicated math. pointer-events-none —
