@@ -2,12 +2,14 @@ defmodule PhoenixKitDashboards.Lattice do
   @moduledoc """
   The grid design space: a GAPLESS lattice of nominal **25px square cells**.
 
-  A layout's `cols × rows` is **exactly one screenful** — the canvas scales to
-  the viewing pane (per-axis stretch when the shapes roughly match, letterboxed
-  artboard beyond that), so nothing ever scrolls. Widget cards carry a small
-  internal margin instead of grid gaps, and content self-fits via
-  container-query type scaling. All widget sizes (min/default/max, per-view
-  minimums) are declared in lattice units.
+  A layout's `cols × rows` is **exactly one screenful** of STANDARD cells —
+  nothing ever scrolls. The fit hook stretches per-axis only to absorb the
+  last ~10% (a fitted screen fills exactly edge-to-edge); otherwise the
+  intact artboard shrinks into a smaller pane, or floats centered at natural
+  size in a bigger one — never blown up (a bigger display wants its own
+  fitted layout). Widget cards carry a small internal margin instead of grid
+  gaps, and content self-fits via container-query type scaling. All widget
+  sizes (default, min, per-view minimums) are declared in lattice units.
   """
 
   @cell 25
@@ -18,9 +20,9 @@ defmodule PhoenixKitDashboards.Lattice do
   @min_dim 4
 
   # Stretch tolerance: the canvas fills the pane with independent per-axis
-  # scales when they differ by no more than this ratio (cells go imperceptibly
-  # non-square and the screen is filled edge-to-edge, no orphan strip). Beyond
-  # it, uniform scale + letterbox (an intact artboard, never distortion).
+  # scales when both stay within this ratio of 1 and of each other (cells go
+  # imperceptibly non-square, no orphan strip). Beyond it: shrink-to-fit or
+  # float-at-natural-size — cells are a real 25px, never blown up.
   @stretch_tolerance 1.10
 
   @doc "The nominal square cell size in design px."

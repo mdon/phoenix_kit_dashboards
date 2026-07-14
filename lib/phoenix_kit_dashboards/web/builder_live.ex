@@ -1018,10 +1018,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
     ~H"""
     <div class="flex min-h-0 flex-1 flex-col">
-      <%!-- ONE SCREENFUL, NEVER SCROLLS: the canvas scales to the pane —
-      per-axis stretch when the shapes roughly match (fills edge-to-edge),
-      uniform scale + letterboxed ARTBOARD when they don't (e.g. designing a
-      portrait layout on a landscape monitor). DashboardGridFit owns the math. --%>
+      <%!-- ONE SCREENFUL, NEVER SCROLLS, STANDARD 25px CELLS: per-axis
+      stretch only absorbs the last ~10% (a fitted screen fills exactly);
+      otherwise the intact artboard shrinks into a smaller pane or floats
+      centered at natural size in a bigger one — never blown up (a bigger
+      display wants its own fitted layout). DashboardGridFit owns the math. --%>
       <div
         id="dashboard-grid-fit"
         phx-hook="DashboardGridFit"

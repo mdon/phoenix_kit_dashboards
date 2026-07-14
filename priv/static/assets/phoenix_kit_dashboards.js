@@ -1147,10 +1147,11 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     },
   };
 
-  // `DashboardGridFit` — lays the grid out at its design width (`data-design-width`)
-  // and scales it via transform to fit the available space: shrink-to-fit for a
-  // different tier's preview; FILL (past 1:1) on the native tier + fullscreen.
-  // Editable at any scale — the drag + resize hooks are transform-aware. Re-fits on resize / fullscreen change (both fire the RO).
+  // `DashboardGridFit` — sizes the grid canvas into the pane. Standard 25px
+  // cells: per-axis stretch absorbs the last <=10% (a fitted screen fills
+  // exactly); otherwise the artboard shrinks to fit a smaller pane or floats
+  // centered at natural size in a bigger one — never blown up. Editable at
+  // any scale; re-fits on resize / fullscreen change (both fire the RO).
   window.PhoenixKitDashboardsHooks.DashboardGridFit = {
     mounted() {
       var self = this;
@@ -1203,9 +1204,13 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var sy = availH / designH;
       var TOLERANCE = 1.10;
 
-      if (Math.max(sx, sy) / Math.min(sx, sy) > TOLERANCE) {
-        // Mismatched shapes: uniform contain (letterboxed artboard).
-        sx = sy = Math.min(sx, sy);
+      // STANDARD CELLS: the lattice cell is a real 25px, and the stretch only
+      // absorbs the last <=10% so a fitted screen fills exactly edge-to-edge.
+      // Anything else renders as an intact artboard: shrunk to fit when the
+      // pane is smaller, FLOATING CENTERED at natural size when it's bigger —
+      // never blown up (a bigger display wants its own fitted layout).
+      if (Math.max(sx, sy) / Math.min(sx, sy) > TOLERANCE || Math.min(sx, sy) > TOLERANCE) {
+        sx = sy = Math.min(sx, sy, 1);
       }
 
       // NATIVE sizing, no transform: the grid re-lays-out at the fitted size,

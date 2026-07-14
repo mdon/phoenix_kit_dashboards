@@ -149,12 +149,14 @@ without stored `x`/`y` are packed at render and pinned on their first edit).
   Each layout is `cols × rows` on a **gapless 25px nominal SQUARE cell
   lattice** (`PhoenixKitDashboards.Lattice`: cell 25, dims 4..160, stretch
   tolerance 1.10) representing **exactly ONE SCREENFUL — nothing scrolls,
-  ever**. `DashboardGridFit` scales the design canvas
-  (`Lattice.design_width/height` = dims × 25) to the pane: per-axis
-  `scale(sx, sy)` when the shapes match within ~10% (fills edge-to-edge,
-  cells go imperceptibly non-square), else uniform scale + a centered
-  letterboxed **artboard** (`bg-base-100 shadow-xl ring-1`) with a mono
-  caption (`Layout 1 · 64×36`; the hook hides it when no room below). The
+  ever**. `DashboardGridFit` sizes the canvas
+  NATIVELY (no transform — text/SVG render crisp and undistorted): per-axis
+  fill when both scales stay within ~10% of 1 and of each other (a fitted
+  screen fills exactly; only the cell rectangles go non-square), else the
+  intact **artboard** (`bg-base-100 shadow-xl ring-1`, mono caption
+  `Layout 1 · 64×36` hidden when no room below) shrinks into a smaller
+  pane or floats centered at NATURAL size in a bigger one — standard
+  cells, never blown up. The
   Layout bar has numeric Grid `cols × rows` inputs (`set_dims`) and a
   **Fit screen** button (`DashboardFitScreen` pushes real screen px;
   server rounds px/25). `set_grid_dims/4` NEVER refuses: it clamps to
