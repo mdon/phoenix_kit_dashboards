@@ -44,6 +44,10 @@ defmodule PhoenixKitDashboards do
 
   @module_key "dashboards"
 
+  # version/0 can't drift from mix.exs on a release (baked in at compile time —
+  # no Mix at runtime). Same pattern as phoenix_kit_projects.
+  @version Mix.Project.config()[:version]
+
   # ── Required callbacks ─────────────────────────────────────────────
 
   @impl PhoenixKit.Module
@@ -74,7 +78,7 @@ defmodule PhoenixKitDashboards do
   # ── Optional callbacks ─────────────────────────────────────────────
 
   @impl PhoenixKit.Module
-  def version, do: "0.1.0"
+  def version, do: @version
 
   @impl PhoenixKit.Module
   def permission_metadata do

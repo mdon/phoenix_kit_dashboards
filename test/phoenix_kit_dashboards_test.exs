@@ -22,7 +22,7 @@ defmodule PhoenixKitDashboardsTest do
     test "core identity callbacks" do
       assert PhoenixKitDashboards.module_key() == "dashboards"
       assert PhoenixKitDashboards.module_name() == "Dashboards"
-      assert PhoenixKitDashboards.version() == "0.1.0"
+      assert PhoenixKitDashboards.version() == Mix.Project.config()[:version]
     end
 
     test "permission metadata key matches module key" do
