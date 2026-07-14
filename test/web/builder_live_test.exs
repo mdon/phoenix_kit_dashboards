@@ -469,7 +469,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       # Canvas starts hidden (revealed by the hook once scaled, so the unscaled
       # frame never flashes); a <noscript> keeps it visible without JS.
       assert html =~ "opacity: 0;"
-      assert html =~ "pk-free-canvas{opacity:1 !important}"
+      # The no-JS reveal is a pure-CSS delayed animation (a <noscript> style
+      # would leak — morphdom livens noscript children after the LV connects).
+      assert html =~ "pk-canvas-reveal"
+      refute html =~ "<noscript>"
     end
   end
 

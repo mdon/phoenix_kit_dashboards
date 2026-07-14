@@ -1037,9 +1037,17 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
             {Gettext.gettext(PhoenixKitWeb.Gettext, "Add widgets from the panel on the right.")}
           </p>
         </div>
-        {Phoenix.HTML.raw(
-          ~s(<noscript><style>#dashboard-grid-fit{display:block !important;overflow:auto !important}.pk-grid-scale-spacer{width:auto !important;height:auto !important}.pk-grid-scale-canvas{opacity:1 !important;position:static !important}</style></noscript>)
-        )}
+        <%!-- No-JS fallback: the canvas starts hidden (the pre-fit frame must
+        never flash), so without the hook a pure-CSS delayed animation reveals
+        it. NOT a <noscript> style — morphdom livens noscript children when
+        the LV patches after connect, leaking the styles into the JS-on page. --%>
+        <style>
+          @keyframes pk-canvas-reveal {
+            to {
+              opacity: 1;
+            }
+          }
+        </style>
         <%!-- The spacer carries the SCALED dimensions (set by the fit hook) so
         flex centering positions the artboard; the canvas is scaled inside it. --%>
         <div class="pk-grid-scale-spacer relative">
@@ -1048,7 +1056,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
               "pk-grid-scale-canvas absolute left-0 top-0",
               "bg-base-100 shadow-xl ring-1 ring-base-content/10"
             ]}
-            style={"width: #{@design_w}px; height: #{@design_h}px; transform-origin: top left; opacity: 0;"}
+            style={"width: #{@design_w}px; height: #{@design_h}px; transform-origin: top left; opacity: 0; animation: pk-canvas-reveal 0s 2.5s forwards;"}
           >
             <div
               id="dashboard-grid"
@@ -1122,19 +1130,25 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         style="scrollbar-gutter: stable;"
       >
       <%!-- The spacer carries the scaled dimensions so the area scrolls; the
-      canvas is scaled in place (transform) by DashboardFreeFit to fill the width.
-      It starts hidden so the pre-fit (unscaled) frame never flashes on load —
+      canvas is scaled in place (transform) by DashboardFreeFit to fill the
+      width. It starts hidden so the pre-fit (unscaled) frame never flashes —
       the fit is one synchronous measure on mount, so there is NO loading
-      state (same as grid mode); the <noscript> keeps it usable without JS. --%>
-      {Phoenix.HTML.raw(
-        ~s(<noscript><style>.pk-free-canvas{opacity:1 !important}</style></noscript>)
-      )}
+      state (same as grid mode). Without JS a pure-CSS delayed animation
+      reveals it (a <noscript> style would leak: morphdom livens noscript
+      children when the LV patches after connect). --%>
+      <style>
+        @keyframes pk-canvas-reveal {
+          to {
+            opacity: 1;
+          }
+        }
+      </style>
       <div class="pk-free-spacer relative" style={"width: #{@cw}px; height: #{@ch}px;"}>
         <div
           id="dashboard-free-grid"
           phx-hook="DashboardFreeDrag"
           class="pk-free-canvas absolute left-0 top-0"
-          style={"width: #{@cw}px; height: #{@ch}px; transform-origin: top left; opacity: 0;"}
+          style={"width: #{@cw}px; height: #{@ch}px; transform-origin: top left; opacity: 0; animation: pk-canvas-reveal 0s 2.5s forwards;"}
           data-logical-width={@cw}
           data-logical-height={@ch}
         >

@@ -1140,8 +1140,10 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       // the scaled dimensions so the container scrolls to fit it.
       spacer.style.width = designW * scale + "px";
       spacer.style.height = designH * scale + "px";
-      // Reveal only once scaled, so the pre-fit (unscaled) frame never flashes.
+      // Reveal only once scaled, so the pre-fit (unscaled) frame never
+      // flashes — and cancel the no-JS fallback reveal animation.
       canvas.style.opacity = "1";
+      canvas.style.animation = "none";
     },
   };
 
@@ -1213,6 +1215,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       spacer.style.width = designW * sx + "px";
       spacer.style.height = designH * sy + "px";
       canvas.style.opacity = "1";
+
+      canvas.style.animation = "none";
 
       // The caption is editor chrome below the board — show it only when the
       // letterbox leaves room there (stretch mode fills edge-to-edge).
