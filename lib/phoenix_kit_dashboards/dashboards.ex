@@ -235,8 +235,10 @@ defmodule PhoenixKitDashboards.Dashboards do
         {:error, :unknown_widget}
 
       %Widget{} = widget ->
+        layout_id = Keyword.get(opts, :layout_id) || first_layout_id(dashboard)
+
         dashboard
-        |> save_layout(dashboard.layout ++ [new_instance(dashboard, widget)])
+        |> save_layout(dashboard.layout ++ [new_instance(dashboard, widget, layout_id)])
         |> log_on_ok("dashboard.widget_added", opts, %{"widget_key" => widget.key})
     end
   end
@@ -262,7 +264,8 @@ defmodule PhoenixKitDashboards.Dashboards do
         {:error, :unknown_widget}
 
       %Widget{} = widget ->
-        # Pin the tier first so placing the new widget can't shift the others.
+        # Pin the layout first so placing the new widget can't shift others
+        # that were still packed-at-render.
         dashboard = materialize_grid(dashboard, bp)
         cols = grid_cols(dashboard, bp)
         w = min(widget.default_size.w, cols)
@@ -276,7 +279,7 @@ defmodule PhoenixKitDashboards.Dashboards do
         else
           instance =
             dashboard
-            |> new_instance(widget)
+            |> new_instance(widget, bp)
             |> Layout.put_placement(bp, %{
               "x" => x,
               "y" => y,
@@ -287,7 +290,7 @@ defmodule PhoenixKitDashboards.Dashboards do
             })
 
           dashboard
-          |> save_customized(dashboard.layout ++ [instance], bp)
+          |> save_pinned(dashboard.layout ++ [instance])
           |> log_on_ok("dashboard.widget_added", opts, %{"widget_key" => widget.key})
         end
     end
@@ -309,7 +312,7 @@ defmodule PhoenixKitDashboards.Dashboards do
       %Widget{} = widget ->
         instance =
           dashboard
-          |> new_instance(widget)
+          |> new_instance(widget, first_layout_id(dashboard))
           |> Layout.put_pixel(%{"fx" => max(fx, 0), "fy" => max(fy, 0)})
 
         dashboard
@@ -318,12 +321,11 @@ defmodule PhoenixKitDashboards.Dashboards do
     end
   end
 
-  # A fresh widget instance with the default geometry: `pixel` stacked below the
-  # existing widgets, and the grid placement seeded at the home tier's first FREE
-  # cell (the home tier is designed — its stored placement renders verbatim, so
-  # the seed span must already fit its columns).
-  defp new_instance(dashboard, %Widget{} = widget) do
-    home = home_bp(dashboard)
+  # A fresh widget instance with the default geometry: `pixel` stacked below
+  # the existing widgets, and the grid placement seeded at `layout_id`'s first
+  # FREE cell. Other layouts pack it first-fit at render (pinned on edit).
+  defp new_instance(dashboard, %Widget{} = widget, layout_id) do
+    home = layout_id
     cols = grid_cols(dashboard, home)
     w = widget.default_size.w
     h = widget.default_size.h
@@ -398,7 +400,7 @@ defmodule PhoenixKitDashboards.Dashboards do
         Layout.put_placement(item, bp, Map.fetch!(placements, item["id"]))
       end)
 
-    save_customized(dashboard, layout, bp)
+    save_pinned(dashboard, layout)
   end
 
   @doc """
@@ -451,7 +453,7 @@ defmodule PhoenixKitDashboards.Dashboards do
             inst
         end)
 
-      save_customized(dashboard, layout, bp)
+      save_pinned(dashboard, layout)
     end
   end
 
@@ -485,7 +487,7 @@ defmodule PhoenixKitDashboards.Dashboards do
         inst -> inst
       end)
 
-    save_customized(dashboard, layout, bp)
+    save_pinned(dashboard, layout)
   end
 
   defp resize_instance(inst, bp, w, h, others, cols) do
@@ -533,72 +535,295 @@ defmodule PhoenixKitDashboards.Dashboards do
         inst -> inst
       end)
 
-    save_customized(dashboard, layout, bp)
+    save_pinned(dashboard, layout)
   end
+
+  # ── Grid layouts (user-defined named grids) ────────────────────────
+  #
+  # A grid dashboard is composed of an ordered list of LAYOUTS stored in
+  # config["layouts"] = [%{"id","name","cols","rows"}]. Widgets are
+  # dashboard-level; each widget's geometry is embedded per layout id
+  # (item["bp"][layout_id]). A layout without a stored placement for a widget
+  # packs it first-fit at render (pinned on first edit) — the same behavior
+  # legacy order-only data always had.
+  #
+  # LEGACY: dashboards from the device-tier era (config["breakpoints"] +
+  # "home_bp") are adapted IN MEMORY — each designed tier becomes a layout
+  # whose id IS the old tier key, so per-widget geometry needs no rewriting.
+  # The adapted list is persisted on the first layout-list mutation.
+
+  @default_layout_cols 12
+  @default_layout_rows 15
 
   @doc """
-  The grid column count for a dashboard at `bp` — the per-dashboard override
-  (`config["breakpoints"][bp]["cols"]`, set by the builder's +/- controls) or
-  the tier default. All placement math and rendering go through this so a
-  resized grid stays consistent everywhere.
+  The dashboard's grid layouts, ordered. Falls back to adapting legacy
+  device-tier data (designed tiers become layouts named after the tier, id =
+  the old tier key), and to a single default "Layout 1" for a fresh dashboard.
   """
-  @spec grid_cols(Dashboard.t(), String.t()) :: pos_integer()
-  def grid_cols(%Dashboard{} = dashboard, bp) do
-    dim_override(dashboard, bp, "cols", 1, Breakpoints.max_grid_cols()) || Breakpoints.cols(bp)
+  @spec layouts(Dashboard.t()) :: [map()]
+  def layouts(%Dashboard{} = dashboard) do
+    case dashboard.config do
+      %{"layouts" => [_ | _] = entries} -> Enum.map(entries, &normalize_entry/1)
+      _ -> legacy_layouts(dashboard)
+    end
   end
 
-  @doc """
-  The designable grid rows for a dashboard at `bp` — the per-dashboard override
-  (`config["breakpoints"][bp]["rows"]`) or the tier default. Rows only bound
-  MANUAL placement and the rendered surface; the pane scrolls vertically.
-  """
-  @spec grid_rows(Dashboard.t(), String.t()) :: pos_integer()
-  def grid_rows(%Dashboard{} = dashboard, bp) do
-    dim_override(dashboard, bp, "rows", 1, Grid.max_rows()) || Breakpoints.max_rows(bp)
+  defp normalize_entry(%{"id" => id} = entry) do
+    %{
+      "id" => to_string(id),
+      "name" => to_string(entry["name"] || "Layout"),
+      "cols" => clamp(entry["cols"] || @default_layout_cols, 1, Breakpoints.max_grid_cols()),
+      "rows" => clamp(entry["rows"] || @default_layout_rows, 1, Grid.max_rows())
+    }
   end
 
-  defp dim_override(dashboard, bp, key, lo, hi) do
-    case get_in(dashboard.config, ["breakpoints", bp, key]) do
-      n when is_integer(n) and n >= lo and n <= hi -> n
+  # Designed legacy tiers -> layout entries (largest tier first). A dashboard
+  # with no designed tier at all gets its legacy home tier (widgets were
+  # seeded there), so pre-layouts widget data always lands in a layout.
+  defp legacy_layouts(dashboard) do
+    designed =
+      for tier <- Breakpoints.all(), legacy_designed?(dashboard, tier.key) do
+        %{
+          "id" => tier.key,
+          "name" => tier.label,
+          "cols" => legacy_dim(dashboard, tier.key, "cols") || tier.cols,
+          "rows" => legacy_dim(dashboard, tier.key, "rows") || tier.max_rows
+        }
+      end
+
+    case designed do
+      [] ->
+        home = legacy_home(dashboard)
+        tier = Breakpoints.get(home) || %{label: "Layout 1", cols: 12, max_rows: 15}
+
+        [
+          %{
+            "id" => home,
+            "name" => tier.label,
+            "cols" => tier.cols,
+            "rows" => tier.max_rows
+          }
+        ]
+
+      entries ->
+        entries
+    end
+  end
+
+  defp legacy_designed?(dashboard, key) do
+    get_in(dashboard.config, ["breakpoints", key, "state"]) == "custom" or
+      key == legacy_home(dashboard)
+  end
+
+  defp legacy_home(dashboard) do
+    case dashboard.config do
+      %{"home_bp" => bp} when is_binary(bp) -> if Breakpoints.get(bp), do: bp, else: "desktop"
+      _ -> "desktop"
+    end
+  end
+
+  defp legacy_dim(dashboard, key, dim) do
+    case get_in(dashboard.config, ["breakpoints", key, dim]) do
+      n when is_integer(n) and n > 0 -> n
       _ -> nil
     end
   end
 
+  @doc "One layout entry by id, or nil."
+  @spec get_layout(Dashboard.t(), String.t()) :: map() | nil
+  def get_layout(%Dashboard{} = dashboard, id) when is_binary(id) do
+    Enum.find(layouts(dashboard), &(&1["id"] == id))
+  end
+
+  @doc "The id of the first (default/landing) layout."
+  @spec first_layout_id(Dashboard.t()) :: String.t()
+  def first_layout_id(%Dashboard{} = dashboard), do: hd(layouts(dashboard))["id"]
+
   @doc """
-  Grow/shrink the grid by one column or row on `bp` (the builder's +/- header
+  Add a layout: named "Layout N" by default, dimensions copied from the
+  `source_id` layout (the active one), placements seeded by reflow+compact of
+  the source's resolved placements — so "+" doubles as duplicate-of-active.
+  Returns `{:ok, dashboard, new_entry}`.
+  """
+  @spec add_layout(Dashboard.t(), String.t(), keyword()) ::
+          {:ok, Dashboard.t(), map()} | {:error, Ecto.Changeset.t()}
+  def add_layout(%Dashboard{} = dashboard, source_id, opts \\ []) when is_binary(source_id) do
+    entries = layouts(dashboard)
+    source = Enum.find(entries, hd(entries), &(&1["id"] == source_id))
+
+    entry = %{
+      "id" => new_layout_id(entries),
+      "name" => Keyword.get(opts, :name) || next_layout_name(entries),
+      "cols" => source["cols"],
+      "rows" => source["rows"]
+    }
+
+    # Seed: the source layout's resolved placements, compacted into the new
+    # grid in reading order (dims match, so this is a straight copy).
+    seeded =
+      dashboard
+      |> resolve_items(source["id"])
+      |> Enum.map(fn {_item, p} -> p end)
+      |> Grid.compact(entry["cols"])
+
+    seeds =
+      dashboard
+      |> resolve_items(source["id"])
+      |> Enum.zip(seeded)
+      |> Map.new(fn {{item, _}, p} -> {item["id"], p} end)
+
+    layout =
+      Enum.map(dashboard.layout, fn item ->
+        case seeds[item["id"]] do
+          nil -> item
+          p -> Layout.put_placement(item, entry["id"], p)
+        end
+      end)
+
+    config = Map.put(dashboard.config, "layouts", entries ++ [entry])
+
+    dashboard
+    |> Ecto.Changeset.change(config: config)
+    |> Ecto.Changeset.force_change(:layout, layout)
+    |> repo().update()
+    |> case do
+      {:ok, updated} -> {:ok, updated, entry}
+      error -> error
+    end
+  end
+
+  # Short random id ("l" + 8 hex chars), regenerated on the (astronomically
+  # unlikely) clash with an existing id in this dashboard.
+  defp new_layout_id(entries) do
+    id = "l" <> (UUIDv7.generate() |> String.replace("-", "") |> String.slice(-8..-1//1))
+    if Enum.any?(entries, &(&1["id"] == id)), do: new_layout_id(entries), else: id
+  end
+
+  defp next_layout_name(entries) do
+    taken = MapSet.new(entries, & &1["name"])
+
+    Enum.find_value(1..99, "Layout ?", fn n ->
+      name = "Layout #{n}"
+      if MapSet.member?(taken, name), do: nil, else: name
+    end)
+  end
+
+  @doc "Rename a layout (blank names are ignored). Not activity-logged."
+  @spec rename_layout(Dashboard.t(), String.t(), String.t()) ::
+          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+  def rename_layout(%Dashboard{} = dashboard, id, name)
+      when is_binary(id) and is_binary(name) do
+    name = String.trim(name)
+
+    if name == "" do
+      {:ok, dashboard}
+    else
+      entries =
+        Enum.map(layouts(dashboard), fn
+          %{"id" => ^id} = entry -> Map.put(entry, "name", String.slice(name, 0, 60))
+          entry -> entry
+        end)
+
+      put_config(dashboard, "layouts", entries)
+    end
+  end
+
+  @doc """
+  Delete a layout and every widget placement stored under its id (widgets are
+  dashboard-level — they live on in the other layouts, packing first-fit where
+  they had no explicit placement). The last layout can't be deleted
+  (`{:error, :last_layout}`).
+  """
+  @spec delete_layout(Dashboard.t(), String.t()) ::
+          {:ok, Dashboard.t()} | {:error, :last_layout | Ecto.Changeset.t()}
+  def delete_layout(%Dashboard{} = dashboard, id) when is_binary(id) do
+    entries = layouts(dashboard)
+
+    cond do
+      not Enum.any?(entries, &(&1["id"] == id)) ->
+        {:ok, dashboard}
+
+      length(entries) <= 1 ->
+        {:error, :last_layout}
+
+      true ->
+        config =
+          Map.put(dashboard.config, "layouts", Enum.reject(entries, &(&1["id"] == id)))
+
+        layout = Enum.map(dashboard.layout, &drop_layout_entry(&1, id))
+
+        dashboard
+        |> Ecto.Changeset.change(config: config)
+        |> Ecto.Changeset.force_change(:layout, layout)
+        |> repo().update()
+    end
+  end
+
+  defp drop_layout_entry(%{"bp" => map} = inst, id) when is_map(map),
+    do: Map.put(inst, "bp", Map.delete(map, id))
+
+  defp drop_layout_entry(inst, _id), do: inst
+
+  @doc "The column count of a layout (defaults when the id is unknown)."
+  @spec grid_cols(Dashboard.t(), String.t()) :: pos_integer()
+  def grid_cols(%Dashboard{} = dashboard, layout_id) do
+    case get_layout(dashboard, layout_id) do
+      %{"cols" => cols} -> cols
+      nil -> @default_layout_cols
+    end
+  end
+
+  @doc "The designable rows of a layout (the pane scrolls vertically)."
+  @spec grid_rows(Dashboard.t(), String.t()) :: pos_integer()
+  def grid_rows(%Dashboard{} = dashboard, layout_id) do
+    case get_layout(dashboard, layout_id) do
+      %{"rows" => rows} -> rows
+      nil -> @default_layout_rows
+    end
+  end
+
+  @doc """
+  Grow/shrink a layout's grid by one column or row (the builder's +/- header
   controls). Shrinking is refused with `{:error, :occupied}` while any widget
   occupies the column/row being removed — move the widget first. Columns are
   bounded to `1..#{Breakpoints.max_grid_cols()}`, rows to `1..#{Grid.max_rows()}`
-  (the hard placement bound). Marks the breakpoint customized (a grid dimension is a
-  design decision for that tier). A layout tweak — not activity-logged.
+  (the hard placement bound). A layout tweak — not activity-logged.
   """
   @spec resize_grid(Dashboard.t(), String.t(), :cols | :rows, integer()) ::
           {:ok, Dashboard.t()} | {:error, :occupied | Ecto.Changeset.t()}
-  def resize_grid(%Dashboard{} = dashboard, bp, dim, delta)
-      when is_binary(bp) and dim in [:cols, :rows] and delta in [-1, 1] do
+  def resize_grid(%Dashboard{} = dashboard, layout_id, dim, delta)
+      when is_binary(layout_id) and dim in [:cols, :rows] and delta in [-1, 1] do
     {current, hi} =
       case dim do
-        :cols -> {grid_cols(dashboard, bp), Breakpoints.max_grid_cols()}
-        :rows -> {grid_rows(dashboard, bp), Grid.max_rows()}
+        :cols -> {grid_cols(dashboard, layout_id), Breakpoints.max_grid_cols()}
+        :rows -> {grid_rows(dashboard, layout_id), Grid.max_rows()}
       end
 
     target = clamp(current + delta, 1, hi)
 
     cond do
+      get_layout(dashboard, layout_id) == nil ->
+        {:ok, dashboard}
+
       target == current ->
         {:ok, dashboard}
 
-      delta < 0 and dim_occupied?(dashboard, bp, dim, target) ->
+      delta < 0 and dim_occupied?(dashboard, layout_id, dim, target) ->
         {:error, :occupied}
 
       true ->
         # Pin resolved placements first so a dimension change can't reshuffle
-        # widgets (a shrunken derived tier would otherwise re-derive).
-        dashboard = materialize_grid(dashboard, bp)
+        # not-yet-pinned (packed-at-render) widgets.
+        dashboard = materialize_grid(dashboard, layout_id)
         key = if dim == :cols, do: "cols", else: "rows"
-        bps = Map.get(dashboard.config, "breakpoints", %{})
-        bp_map = bps |> Map.get(bp, %{}) |> Map.put(key, target) |> Map.put("state", "custom")
-        config = Map.put(dashboard.config, "breakpoints", Map.put(bps, bp, bp_map))
+
+        entries =
+          Enum.map(layouts(dashboard), fn
+            %{"id" => ^layout_id} = entry -> Map.put(entry, key, target)
+            entry -> entry
+          end)
+
+        config = Map.put(dashboard.config, "layouts", entries)
 
         dashboard
         |> Ecto.Changeset.change(config: config)
@@ -607,22 +832,20 @@ defmodule PhoenixKitDashboards.Dashboards do
     end
   end
 
-  # Would shrinking to `target` cols/rows cut into any resolved placement?
-  # (Hidden widgets keep their cells, so they count too.)
   @doc """
-  The design-space canvas width for a dashboard at `bp` — derived from its
-  column count at a constant cell size (`Breakpoints.design_width/1`). More
-  columns = a wider canvas that the builder's fit hook scales down, so widget
-  contents shrink uniformly and always keep fitting.
+  The design-space canvas width for a layout — derived from its column count
+  at a constant cell size (`Breakpoints.design_width/1`).
   """
   @spec design_width(Dashboard.t(), String.t()) :: pos_integer()
-  def design_width(%Dashboard{} = dashboard, bp) do
-    Breakpoints.design_width(grid_cols(dashboard, bp))
+  def design_width(%Dashboard{} = dashboard, layout_id) do
+    Breakpoints.design_width(grid_cols(dashboard, layout_id))
   end
 
-  defp dim_occupied?(dashboard, bp, dim, target) do
+  # Would shrinking to `target` cols/rows cut into any resolved placement?
+  # (Hidden widgets keep their cells, so they count too.)
+  defp dim_occupied?(dashboard, layout_id, dim, target) do
     dashboard
-    |> resolve_items(bp)
+    |> resolve_items(layout_id)
     |> Enum.any?(fn {_item, p} ->
       case dim do
         :cols -> is_integer(p["x"]) and p["x"] + (p["w"] || 1) > target
@@ -632,52 +855,20 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   @doc """
-  Reset a breakpoint to auto — drops its stored per-widget placements + custom
-  flag (and any grid dimension overrides) so it re-derives from the home tier.
-  The home tier (the design anchor) can't be reset. Not activity-logged.
-  """
-  @spec reset_breakpoint(Dashboard.t(), String.t()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
-  def reset_breakpoint(%Dashboard{} = dashboard, bp) when is_binary(bp) do
-    if bp == home_bp(dashboard) do
-      {:ok, dashboard}
-    else
-      layout = Enum.map(dashboard.layout, &drop_bp(&1, bp))
-      bps = Map.get(dashboard.config, "breakpoints", %{})
-      config = Map.put(dashboard.config, "breakpoints", Map.delete(bps, bp))
-      dashboard |> Ecto.Changeset.change(layout: layout, config: config) |> repo().update()
-    end
-  end
+  The `{item, placement}` pairs to render for a layout — the single render
+  path. Every returned placement carries explicit cells (`x`/`y`) plus
+  `w`/`h`/`hidden`: stored cells render verbatim; placements without stored
+  cells for this layout (a widget added elsewhere, or pre-cells legacy data)
+  pack first-fit into the remaining free cells in `pos` order — pinned on
+  their first edit, no migration.
 
-  defp drop_bp(%{"bp" => bps} = inst, bp) when is_map(bps),
-    do: Map.put(inst, "bp", Map.delete(bps, bp))
-
-  defp drop_bp(inst, _bp), do: inst
-
-  @doc """
-  The `{item, placement}` pairs to render at `bp` — the single render path shared
-  by the builder (explicit breakpoint) and the runtime (viewport-matched), so
-  preview and runtime never diverge. Every returned placement carries explicit
-  cells (`x`/`y`) plus `w`/`h`/`hidden`:
-
-    * a **designed** breakpoint renders its stored cells verbatim; stored
-      placements that predate explicit cells (order-only) are packed into the
-      remaining free cells in `pos` order, so old layouts keep their arrangement
-      without a migration (their first edit persists the cells);
-    * an **un-designed** breakpoint is derived from the nearest designed tier by
-      reflow + compact: its widgets in reading order, spans clamped to the
-      target's columns, packed first-fit.
-
-  Ordered by reading order (`y`, then `x`); **hidden widgets are included** (the
-  builder dims them and they keep their cells; pass `visible: true` — or filter
-  `placement["hidden"]` — for the runtime).
+  Ordered by reading order (`y`, then `x`); **hidden widgets are included**
+  (the builder dims them and they keep their cells; pass `visible: true` — or
+  filter `placement["hidden"]` — for the runtime).
   """
   @spec resolve_items(Dashboard.t(), String.t(), keyword()) :: [{map(), map()}]
-  def resolve_items(%Dashboard{} = dashboard, bp, opts \\ []) do
-    items =
-      if customized?(dashboard, bp),
-        do: resolve_designed(dashboard, bp),
-        else: derive_tier(dashboard, bp)
+  def resolve_items(%Dashboard{} = dashboard, layout_id, opts \\ []) do
+    items = resolve_designed(dashboard, layout_id)
 
     if opts[:visible], do: Enum.reject(items, fn {_i, p} -> p["hidden"] == true end), else: items
   end
@@ -704,64 +895,6 @@ defmodule PhoenixKitDashboards.Dashboards do
       nil -> false
       placement -> placement["hidden"] == true
     end
-  end
-
-  @doc """
-  The dashboard's **home** breakpoint — the size it was designed at (seeded into,
-  and the anchor other tiers derive from). Set from the creator's screen on first
-  open; `config["home_bp"]`, defaulting to the module default (desktop) for
-  dashboards created before the home concept (their widgets were seeded there).
-  """
-  @spec home_bp(Dashboard.t()) :: String.t()
-  def home_bp(%Dashboard{config: config}) do
-    case config do
-      %{"home_bp" => bp} when is_binary(bp) ->
-        if Breakpoints.valid?(bp), do: bp, else: Breakpoints.default()
-
-      _ ->
-        Breakpoints.default()
-    end
-  end
-
-  @doc """
-  Record the dashboard's home breakpoint — only when it's still unset AND the
-  dashboard is empty (a brand-new one on first open); otherwise a no-op, so an
-  existing dashboard's home never moves under a different viewer's screen.
-  """
-  @spec put_home_bp(Dashboard.t(), String.t()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
-  def put_home_bp(%Dashboard{} = dashboard, bp) when is_binary(bp) do
-    fresh? = is_nil(get_in(dashboard.config, ["home_bp"])) and dashboard.layout == []
-
-    if fresh? and Breakpoints.valid?(bp) do
-      config = Map.put(dashboard.config, "home_bp", bp)
-      dashboard |> Ecto.Changeset.change(config: config) |> repo().update()
-    else
-      {:ok, dashboard}
-    end
-  end
-
-  @doc """
-  The **designed** breakpoint to display for a viewer whose screen best fits
-  `screen_bp` — that tier if it's designed, else the nearest designed tier (which
-  the caller scales to fit). Never a freshly-derived tier: on open we only ever
-  show views someone actually made.
-  """
-  @spec display_bp(Dashboard.t(), String.t()) :: String.t()
-  def display_bp(%Dashboard{} = dashboard, screen_bp) when is_binary(screen_bp) do
-    if customized?(dashboard, screen_bp),
-      do: screen_bp,
-      else: derivation_source(dashboard, screen_bp)
-  end
-
-  @doc """
-  Whether a breakpoint is a **designed** view: hand-customized, or the home tier
-  (always designed — it's the seed + derivation anchor).
-  """
-  @spec customized?(Dashboard.t(), String.t()) :: boolean()
-  def customized?(%Dashboard{} = dashboard, bp) do
-    get_in(dashboard.config, ["breakpoints", bp, "state"]) == "custom" or
-      bp == home_bp(dashboard)
   end
 
   @doc """
@@ -975,28 +1108,15 @@ defmodule PhoenixKitDashboards.Dashboards do
     save_layout(dashboard, layout)
   end
 
-  # Persist a per-breakpoint edit: the new layout + mark the breakpoint customized
-  # (in one write, so the two can't diverge). The layout write is FORCED:
-  # materialize_grid pre-mutates the struct in memory, so a plain change/2 would
-  # diff against the materialized copy and silently skip persisting it whenever
-  # the edit's final values equal the derived ones (e.g. resizing a derived tier
-  # to the size it already shows) — the DB row would keep the un-materialized
-  # layout while the config already says "custom".
-  defp save_customized(dashboard, layout, bp) do
-    config = mark_customized(dashboard.config, bp)
-
+  # Persist a per-layout placement edit. The write is FORCED: materialize_grid
+  # pre-mutates the struct in memory, so a plain change/2 would diff against
+  # the materialized copy and silently skip persisting it whenever the edit's
+  # final values equal the packed ones.
+  defp save_pinned(dashboard, layout) do
     dashboard
-    |> Ecto.Changeset.change(config: config)
+    |> Ecto.Changeset.change()
     |> Ecto.Changeset.force_change(:layout, layout)
     |> repo().update()
-  end
-
-  # Merge (not replace) the tier map: it may carry "cols"/"rows" overrides that
-  # a plain %{"state" => "custom"} write would wipe.
-  defp mark_customized(config, bp) do
-    bps = Map.get(config, "breakpoints", %{})
-    bp_map = bps |> Map.get(bp, %{}) |> Map.put("state", "custom")
-    Map.put(config, "breakpoints", Map.put(bps, bp, bp_map))
   end
 
   # A designed breakpoint: stored explicit cells render verbatim; order-only
@@ -1029,21 +1149,6 @@ defmodule PhoenixKitDashboards.Dashboards do
     Enum.sort_by(placed ++ packed, fn {_item, p} -> {p["y"], p["x"], p["pos"]} end)
   end
 
-  # An un-designed breakpoint derives from the nearest designed tier by
-  # reflow + compact: that tier's widgets in reading order, spans clamped to this
-  # tier's columns, packed first-fit (heights/hidden kept).
-  defp derive_tier(dashboard, bp) do
-    source_items = resolve_items(dashboard, derivation_source(dashboard, bp))
-
-    packed =
-      source_items |> Enum.map(fn {_item, p} -> p end) |> Grid.compact(grid_cols(dashboard, bp))
-
-    source_items
-    |> Enum.zip(packed)
-    |> Enum.map(fn {{item, _src}, p} -> {item, p} end)
-    |> Enum.sort_by(fn {_item, p} -> {p["y"], p["x"], p["pos"]} end)
-  end
-
   # Before ANY grid edit at `bp`, pin every widget's currently-resolved placement
   # (explicit cells included) into that breakpoint — so editing one widget can't
   # shift the others (they're anchored where the user sees them), whether the
@@ -1058,12 +1163,11 @@ defmodule PhoenixKitDashboards.Dashboards do
     end
   end
 
-  defp grid_materialized?(dashboard, bp) do
-    customized?(dashboard, bp) and
-      Enum.all?(dashboard.layout, fn item ->
-        p = get_in(item, ["bp", bp])
-        is_map(p) and is_integer(p["x"]) and is_integer(p["y"])
-      end)
+  defp grid_materialized?(dashboard, layout_id) do
+    Enum.all?(dashboard.layout, fn item ->
+      p = get_in(item, ["bp", layout_id])
+      is_map(p) and is_integer(p["x"]) and is_integer(p["y"])
+    end)
   end
 
   defp materialize_item(item, bp, resolved) do
@@ -1071,13 +1175,6 @@ defmodule PhoenixKitDashboards.Dashboards do
       nil -> item
       placement -> Layout.put_placement(item, bp, placement)
     end
-  end
-
-  # The breakpoint to derive a fresh `bp` from: nearest LARGER customized, then
-  # nearest smaller customized, then the home tier (the always-designed anchor).
-  defp derivation_source(dashboard, bp) do
-    chain = Breakpoints.larger_than(bp) ++ Breakpoints.smaller_than(bp)
-    Enum.find(chain, home_bp(dashboard), &customized?(dashboard, &1))
   end
 
   # The first free pixel row below every placed widget, so a new pixel-canvas

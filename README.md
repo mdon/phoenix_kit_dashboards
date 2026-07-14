@@ -3,35 +3,21 @@
 Customizable dashboards for [PhoenixKit](https://github.com/BeamLabEU/phoenix_kit).
 
 Compose dashboard pages from **widgets** contributed by any PhoenixKit module.
-A widget is a self-contained `Phoenix.LiveComponent`; a dashboard is a
-responsive grid of widget instances — each anchored at an explicit cell
-(gaps allowed, no overlap) and spanning `w` columns × `h` rows per breakpoint
-tier (TV 16 / Desktop 12 / iPad 8 / Phone 4 columns), with undesigned tiers
-auto-derived by reflow + compact. A second dashboard type is a **pixel canvas**
-(exact-px placement, deliberate overlap via z-order). The grid is
-**server-rendered** (Phoenix-first — it renders and is operable without
-JavaScript via the settings modal); drag/resize/catalog-drag are progressive
-enhancement via the module's own hooks (`js_sources/0`). Layouts persist per
-user (personal dashboards) and per system/role (shared dashboards).
-
-## Instant tier detection (recommended)
-
-The grid builder picks the responsive tier (TV/Desktop/iPad/Phone) that best
-fits the viewer's screen. By default that needs a client hook round-trip after
-connect, so the dashboard briefly shows a loading state. Pass the viewport in
-your LiveSocket connect params and the tier is resolved server-side at mount —
-the dashboard loads straight into the right layout:
-
-```js
-// assets/js/app.js — a closure so reconnects re-read the width
-const liveSocket = new LiveSocket("/live", Socket, {
-  params: () => ({_csrf_token: csrfToken, viewport_width: window.innerWidth}),
-  hooks: {...window.PhoenixKitHooks},
-})
-```
-
-Hosts that don't pass `viewport_width` keep working — detection falls back to
-the hook round-trip.
+A widget is a self-contained `Phoenix.LiveComponent`; a grid dashboard is an
+ordered set of **user-defined layouts** (e.g. "Desktop", "Wall TV",
+"Portrait door screen") — each just a named `cols × rows` grid with its own
+widget placements, managed from a tab strip in the builder (add copies the
+active layout; rename/delete inline). Widgets anchor at explicit cells (gaps
+allowed, no overlap); the design space uses a constant square cell, and the
+canvas always scales to fill the pane width, so widget contents shrink/grow
+uniformly at any column count. A dashboard opens instantly on its first
+layout — or a specific one via the `?layout=<id>` deep link (handy for wall
+displays). A second dashboard type is a **pixel canvas** (exact-px placement,
+deliberate overlap via z-order). The grid is **server-rendered**
+(Phoenix-first — it renders and is operable without JavaScript via the
+settings modal); drag/resize/catalog-drag are progressive enhancement via the
+module's own hooks (`js_sources/0`). Dashboards persist per user (personal)
+and per system/role (shared).
 
 ## Installation
 

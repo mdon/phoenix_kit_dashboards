@@ -52,7 +52,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       actor_opts: 1,
       user_role_uuids: 1,
       scope_label: 1,
-      bp_label: 1,
       translate_catalog: 1
     ]
 
@@ -74,50 +73,16 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    # Best case the tier is known BEFORE the first live render: a host whose
-    # LiveSocket passes `viewport_width` in the connect params (see the module
-    # README) tells us the screen at connected mount, so the dashboard loads
-    # straight into the right tier — no detection round-trip, no loading state.
-    viewport_bp =
-      with true <- connected?(socket),
-           %{"viewport_width" => w} when is_number(w) and w > 0 <- get_connect_params(socket) do
-        Breakpoints.for_width(w)
-      else
-        _ -> nil
-      end
-
-    # Safety net: reveal the grid at the default tier if the DashboardBreakpoint
-    # hook never reports (JS present but the hook/asset failed) — a stuck-invisible
-    # dashboard is worse than the default tier. This must NOT race a slow-but-
-    # working load (cold asset cache, heavy widget queries): losing that race
-    # flashes the desktop tier before the detected one snaps in. A no-JS browser
-    # is revealed instantly by the <noscript> style, so this timer only serves
-    # the broken-asset case — it can afford to be generous.
-    if connected?(socket) and is_nil(viewport_bp),
-      do: Process.send_after(self(), :reveal_grid_fallback, 4000)
-
     {:ok,
      socket
      |> assign(:catalog, Registry.list_for_scope(socket.assigns[:phoenix_kit_current_scope]))
      |> assign(:settings_instance, nil)
-     # Which breakpoint the grid builder is editing. On connect the
-     # DashboardBreakpoint hook detects the tier that best fits the screen (once)
-     # and it stays there; the grid is hidden until `detected?` so there's no
-     # wrong-tier flash. `bp_manual?` locks it once the user picks a tab.
-     |> assign(:active_bp, Breakpoints.default())
-     |> assign(:detected?, false)
-     # The screen tier from the connect params (nil = wait for the hook), and
-     # whether the REAL screen is known — a fallback-timer reveal sets detected?
-     # without knowledge, and a late hook report must still correct it.
-     |> assign(:viewport_bp, viewport_bp)
-     |> assign(:screen_known?, false)
-     |> assign(:bp_manual?, false)
-     # The viewer's own screen tier (from the detect hook), so we can tell when the
-     # active view is a different size (shown scaled) vs the viewer's own size.
-     |> assign(:screen_bp, Breakpoints.default())
-     # True when the active view isn't the viewer's own size (drives the "scaled to
-     # fit" banner). The grid is always fit-scaled + editable regardless.
-     |> assign(:scaled?, false)
+     # The layout being viewed/edited — resolved in handle_params (first layout,
+     # or the ?layout= deep link). No detection, no loading state: a dashboard
+     # opens instantly on a designed layout.
+     |> assign(:active_layout, nil)
+     # The layout id currently in inline-rename mode (nil = none).
+     |> assign(:renaming_layout, nil)
      |> assign(:refresh_at, %{})
      # QoL: show the empty grid cells while designing (session-local toggle).
      |> assign(:show_grid_lines, false)
@@ -125,7 +90,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   end
 
   @impl true
-  def handle_params(%{"uuid" => uuid}, _uri, socket) do
+  def handle_params(%{"uuid" => uuid} = params, _uri, socket) do
     case Dashboards.get(uuid) do
       nil ->
         {:noreply,
@@ -139,7 +104,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
            socket
            |> assign(:dashboard, dashboard)
            |> assign(:page_title, dashboard.title)
-           |> maybe_apply_viewport_bp()
+           |> resolve_active_layout(params["layout"])
            |> maybe_schedule_refresh()}
         else
           {:noreply,
@@ -169,7 +134,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       Dashboards.add_widget_at(
         socket.assigns.dashboard,
         key,
-        socket.assigns.active_bp,
+        socket.assigns.active_layout,
         to_i(x),
         to_i(y),
         actor_opts(socket)
@@ -213,7 +178,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       Dashboards.place_widget_grid(
         socket.assigns.dashboard,
         id,
-        socket.assigns.active_bp,
+        socket.assigns.active_layout,
         to_i(x),
         to_i(y)
       )
@@ -228,7 +193,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       when is_list(ordered_ids) do
     case Dashboards.reorder_widgets(
            socket.assigns.dashboard,
-           socket.assigns.active_bp,
+           socket.assigns.active_layout,
            ordered_ids
          ) do
       {:ok, dashboard} ->
@@ -242,53 +207,78 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end
   end
 
-  # Manually pick a size to view/edit. It's editable at any size (fit-scaled);
-  # `scaled?` (≠ the viewer's own size) just drives the banner. Locks off viewport
-  # detection.
   @impl true
-  def handle_event("set_bp", %{"bp" => bp}, socket) do
-    if Breakpoints.valid?(bp) do
-      {:noreply,
-       socket
-       |> assign(:active_bp, bp)
-       |> assign(:scaled?, bp != socket.assigns.screen_bp)
-       |> assign(:bp_manual?, true)
-       |> assign(:detected?, true)}
+  def handle_event("set_layout", %{"id" => id}, socket) when is_binary(id) do
+    if Dashboards.get_layout(socket.assigns.dashboard, id) do
+      {:noreply, socket |> assign(:active_layout, id) |> assign(:renaming_layout, nil)}
     else
       {:noreply, socket}
     end
   end
 
-  # The tier that best fits the screen, from the DashboardBreakpoint hook on connect.
-  # We show a DESIGNED view (this tier if designed, else the nearest one scaled to
-  # fit) — never a freshly-derived layout. Records the home tier on a brand-new
-  # dashboard. Applied once, until the user manually picks a tab.
+  # "+" — instant-create seeded from the active layout (doubles as duplicate),
+  # activate it, and drop straight into rename mode.
   @impl true
-  def handle_event("detect_bp", %{"bp" => screen_bp}, socket) do
-    cond do
-      # The connect params already told us (or a prior report did) — the hook's
-      # round-trip is just the fallback path arriving late.
-      socket.assigns.screen_known? ->
-        {:noreply, socket}
-
-      not Breakpoints.valid?(screen_bp) ->
-        {:noreply, assign(socket, :detected?, true)}
-
-      # The user already tapped a size before this arrived — keep their choice, but
-      # still record their real screen so `scaled?` (view ≠ their size) is correct.
-      socket.assigns.bp_manual? ->
-        dashboard = put_home_bp_or_keep(socket.assigns.dashboard, screen_bp)
-
+  def handle_event("add_layout", _params, socket) do
+    case Dashboards.add_layout(socket.assigns.dashboard, socket.assigns.active_layout) do
+      {:ok, dashboard, entry} ->
         {:noreply,
          socket
          |> assign(:dashboard, dashboard)
-         |> assign(:screen_bp, screen_bp)
-         |> assign(:scaled?, socket.assigns.active_bp != screen_bp)
-         |> assign(:detected?, true)
-         |> assign(:screen_known?, true)}
+         |> assign(:active_layout, entry["id"])
+         |> assign(:renaming_layout, entry["id"])}
 
-      true ->
-        {:noreply, apply_screen_bp(socket, screen_bp)}
+      {:error, _} ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("start_rename_layout", %{"id" => id}, socket) when is_binary(id) do
+    {:noreply, assign(socket, :renaming_layout, id)}
+  end
+
+  @impl true
+  def handle_event("cancel_rename_layout", _params, socket) do
+    {:noreply, assign(socket, :renaming_layout, nil)}
+  end
+
+  @impl true
+  def handle_event("rename_layout", %{"id" => id, "name" => name}, socket)
+      when is_binary(id) and is_binary(name) do
+    case Dashboards.rename_layout(socket.assigns.dashboard, id, name) do
+      {:ok, dashboard} ->
+        {:noreply, socket |> assign(:dashboard, dashboard) |> assign(:renaming_layout, nil)}
+
+      {:error, _} ->
+        {:noreply, assign(socket, :renaming_layout, nil)}
+    end
+  end
+
+  @impl true
+  def handle_event("delete_layout", %{"id" => id}, socket) when is_binary(id) do
+    case Dashboards.delete_layout(socket.assigns.dashboard, id) do
+      {:ok, dashboard} ->
+        # If the active layout died, fall back to the first remaining one.
+        socket = assign(socket, :dashboard, dashboard)
+
+        active =
+          if socket.assigns.active_layout == id,
+            do: Dashboards.first_layout_id(dashboard),
+            else: socket.assigns.active_layout
+
+        {:noreply, socket |> assign(:active_layout, active) |> assign(:renaming_layout, nil)}
+
+      {:error, :last_layout} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           Gettext.gettext(PhoenixKitWeb.Gettext, "A dashboard needs at least one layout.")
+         )}
+
+      {:error, _} ->
+        {:noreply, socket}
     end
   end
 
@@ -303,7 +293,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   def handle_event("grid_dim", %{"dim" => dim, "delta" => delta}, socket) do
     with {:ok, dim} <- Map.fetch(%{"cols" => :cols, "rows" => :rows}, dim),
          d when d in [-1, 1] <- to_i(delta) do
-      case Dashboards.resize_grid(socket.assigns.dashboard, socket.assigns.active_bp, dim, d) do
+      case Dashboards.resize_grid(socket.assigns.dashboard, socket.assigns.active_layout, dim, d) do
         {:ok, dashboard} ->
           {:noreply, assign(socket, :dashboard, dashboard)}
 
@@ -334,15 +324,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end
   end
 
-  # Reset the active breakpoint to auto (re-derive from a larger one).
-  @impl true
-  def handle_event("reset_bp", _params, socket) do
-    apply_layout(
-      socket,
-      Dashboards.reset_breakpoint(socket.assigns.dashboard, socket.assigns.active_bp)
-    )
-  end
-
   # Free/pixel-canvas resize (DashboardResize hook, free mode): absolute px size,
   # no snap. Stored under fw/fh; the context clamps to a sane px range.
   @impl true
@@ -363,7 +344,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
          rh when rh >= 1 <- to_i(h) do
       apply_layout(
         socket,
-        Dashboards.resize_widget(socket.assigns.dashboard, id, socket.assigns.active_bp, rw, rh)
+        Dashboards.resize_widget(
+          socket.assigns.dashboard,
+          id,
+          socket.assigns.active_layout,
+          rw,
+          rh
+        )
       )
     else
       # A non-positive / unparseable span (only a crafted event) is ignored rather
@@ -440,8 +427,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         # shrunk by the OLD neighbourhood. A failing geometry write (transient
         # DB error, or a Column/Row pointing at an occupied spot) keeps the last
         # successfully-saved dashboard rather than reverting to stale data.
-        d2 = apply_or_keep(d1, &maybe_place(&1, instance_id, socket.assigns.active_bp, params))
-        d3 = apply_or_keep(d2, &maybe_resize(&1, instance_id, socket.assigns.active_bp, params))
+        d2 =
+          apply_or_keep(d1, &maybe_place(&1, instance_id, socket.assigns.active_layout, params))
+
+        d3 =
+          apply_or_keep(d2, &maybe_resize(&1, instance_id, socket.assigns.active_layout, params))
+
         {:noreply, assign(socket, :dashboard, d3)}
 
       {:error, _} ->
@@ -467,7 +458,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     # widget's `size` matches what it first rendered with (no size flip on refresh).
     placements =
       socket.assigns.dashboard
-      |> Dashboards.resolve_items(socket.assigns.active_bp)
+      |> Dashboards.resolve_items(socket.assigns.active_layout)
       |> Map.new(fn {item, p} -> {item["id"], p} end)
 
     refresh_at =
@@ -487,13 +478,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       # can restart it (via maybe_schedule_refresh/1) without a full remount.
       {:noreply, assign(socket, :refresh_scheduled?, false)}
     end
-  end
-
-  # Fallback reveal: if the breakpoint hook never reported, un-hide the grid at the
-  # default tier so it can't stay stuck invisible.
-  @impl true
-  def handle_info(:reveal_grid_fallback, socket) do
-    {:noreply, assign(socket, :detected?, true)}
   end
 
   @impl true
@@ -554,7 +538,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # the active tier's resolved placement (matching the first render), or the default
   # tier when unavailable.
   defp widget_update_assigns(inst, scope, placement) do
-    p = placement || Layout.placement(inst, Breakpoints.default())
+    # Fallback: Layout.placement/2 returns the span defaults for any id.
+    p = placement || Layout.placement(inst, "default")
 
     [
       id: inst["id"],
@@ -578,40 +563,23 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   defp maybe_put_min_override(attrs, val),
     do: Map.put(attrs, :min_override, val in [true, "true"])
 
-  # Connect params told us the screen at mount — apply it once the dashboard is
-  # loaded, and only once (a live patch must not reset a manual tab pick).
-  defp maybe_apply_viewport_bp(socket) do
-    if socket.assigns.viewport_bp && not socket.assigns.detected?,
-      do: apply_screen_bp(socket, socket.assigns.viewport_bp),
-      else: socket
-  end
+  # Resolve which layout to show: the ?layout= deep link when valid, else the
+  # current assign when still valid (live patches must not reset the tab), else
+  # the first layout.
+  defp resolve_active_layout(socket, param_id) do
+    dashboard = socket.assigns.dashboard
 
-  # Record the home tier, degrading to the unchanged dashboard on a transient
-  # DB error (every other write path here degrades too — a failed nicety write
-  # must not crash the LiveView).
-  defp put_home_bp_or_keep(dashboard, screen_bp) do
-    case Dashboards.put_home_bp(dashboard, screen_bp) do
-      {:ok, updated} -> updated
-      {:error, _} -> dashboard
+    cond do
+      is_binary(param_id) and Dashboards.get_layout(dashboard, param_id) != nil ->
+        assign(socket, :active_layout, param_id)
+
+      socket.assigns.active_layout != nil and
+          Dashboards.get_layout(dashboard, socket.assigns.active_layout) != nil ->
+        socket
+
+      true ->
+        assign(socket, :active_layout, Dashboards.first_layout_id(dashboard))
     end
-  end
-
-  # The user's real screen tier is known (connect params or the detect hook):
-  # show a DESIGNED view — this tier if designed, else the nearest one scaled to
-  # fit — never a freshly-derived layout. Records the home tier on a brand-new
-  # dashboard.
-  defp apply_screen_bp(socket, screen_bp) do
-    dashboard = put_home_bp_or_keep(socket.assigns.dashboard, screen_bp)
-    active_bp = Dashboards.display_bp(dashboard, screen_bp)
-    scaled? = active_bp != screen_bp
-
-    socket
-    |> assign(:dashboard, dashboard)
-    |> assign(:screen_bp, screen_bp)
-    |> assign(:active_bp, active_bp)
-    |> assign(:scaled?, scaled?)
-    |> assign(:detected?, true)
-    |> assign(:screen_known?, true)
   end
 
   # Assign the updated dashboard on a successful layout write; a rare `{:error, _}`
@@ -734,9 +702,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         <.grid
           dashboard={@dashboard}
           scope={@phoenix_kit_current_scope}
-          active_bp={@active_bp}
-          detected={@detected?}
-          scaled={@scaled?}
+          active_layout={@active_layout}
+          renaming_layout={@renaming_layout}
           show_grid_lines={@show_grid_lines}
         />
         <.catalog_drawer catalog={@catalog} />
@@ -746,10 +713,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         :if={@settings_instance}
         instance={settings_instance_data(@dashboard, @settings_instance)}
         mode={Dashboard.layout_mode(@dashboard)}
-        active_bp={@active_bp}
-        grid_placement={Dashboards.resolve_placement(@dashboard, @settings_instance, @active_bp)}
-        cols={Dashboards.grid_cols(@dashboard, @active_bp)}
-        max_rows={Dashboards.grid_rows(@dashboard, @active_bp)}
+        active_layout={@active_layout}
+        grid_placement={Dashboards.resolve_placement(@dashboard, @settings_instance, @active_layout)}
+        cols={Dashboards.grid_cols(@dashboard, @active_layout)}
+        max_rows={Dashboards.grid_rows(@dashboard, @active_layout)}
       />
     </div>
     """
@@ -760,53 +727,22 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # z-order restack).
   attr(:dashboard, :map, required: true)
   attr(:scope, :any, required: true)
-  attr(:active_bp, :string, required: true)
-  attr(:detected, :boolean, required: true)
-  attr(:scaled, :boolean, required: true)
+  attr(:active_layout, :string, required: true)
+  attr(:renaming_layout, :string, default: nil)
   attr(:show_grid_lines, :boolean, required: true)
 
   defp grid(assigns) do
-    mode = Dashboard.layout_mode(assigns.dashboard)
-
-    assigns =
-      assigns
-      |> assign(:mode, mode)
-      # Grid dashboards stay hidden until the best-fit tier is resolved (no
-      # wrong-tier flash — the switcher tab + grid reveal together); pixel has no
-      # tier detection, so it's revealed immediately.
-      |> assign(:revealed, assigns.detected or mode != "grid")
+    assigns = assign(assigns, :mode, Dashboard.layout_mode(assigns.dashboard))
 
     ~H"""
     <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <div
-        :if={@mode == "grid"}
-        id="dashboard-bp-detect"
-        phx-hook="DashboardBreakpoint"
-        data-breakpoints={bp_thresholds()}
-        class="hidden"
-      >
-      </div>
-
-      <%!-- Until the best-fit tier is resolved, show a loading state instead of the
-      grid — so the switcher never animates desktop→tv (the grid uses display:none,
-      which doesn't prime the tab's colour transition, so it appears already on the
-      right tier). <noscript> swaps them for no-JS. --%>
-      {Phoenix.HTML.raw(
-        ~s(<noscript><style>.pk-grid-loading{display:none!important}.pk-grid-ready{display:flex!important}</style></noscript>)
-      )}
-
-      <div class={[
-        "pk-grid-loading flex flex-1 flex-col items-center justify-center gap-3 bg-base-200 text-base-content/50",
-        @revealed && "hidden"
-      ]}>
-        <span class="loading loading-spinner loading-lg"></span>
-        <p class="text-sm">{Gettext.gettext(PhoenixKitWeb.Gettext, "Fitting the dashboard to your screen…")}</p>
-      </div>
-
-      <div class={["pk-grid-ready flex min-h-0 flex-1 flex-col", not @revealed && "hidden"]}>
-        <.mode_bar
+      <%!-- No loading state: layouts are user-defined, nothing to detect —
+      a dashboard opens instantly on its (deep-linked or first) layout. --%>
+      <div class="flex min-h-0 flex-1 flex-col">
+        <.layout_bar
           :if={@mode == "grid"}
-          active_bp={@active_bp}
+          active_layout={@active_layout}
+          renaming_layout={@renaming_layout}
           dashboard={@dashboard}
           show_grid_lines={@show_grid_lines}
         />
@@ -827,8 +763,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           :if={@mode == "grid"}
           dashboard={@dashboard}
           scope={@scope}
-          active_bp={@active_bp}
-          scaled={@scaled}
+          active_layout={@active_layout}
           show_grid_lines={@show_grid_lines}
           empty={@dashboard.layout == []}
         />
@@ -838,46 +773,114 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     """
   end
 
-  attr(:active_bp, :string, required: true)
+  attr(:active_layout, :string, required: true)
+  attr(:renaming_layout, :string, default: nil)
   attr(:dashboard, :map, required: true)
   attr(:show_grid_lines, :boolean, required: true)
 
-  defp mode_bar(assigns) do
+  # The layout tab strip: [Layout 1] [Layout 2] [+], an actions dropdown on the
+  # ACTIVE tab (rename / delete — no nested buttons inside tabs, per a11y), and
+  # the per-layout Columns/Rows + Show-grid controls on the right. Renaming
+  # swaps the tab for an inline input (Enter commits, Esc/blur cancels).
+  defp layout_bar(assigns) do
+    assigns = assign(assigns, :entries, Dashboards.layouts(assigns.dashboard))
+
     ~H"""
     <div class="flex items-center gap-2 border-b border-base-300 bg-base-100 px-4 py-1.5">
-      <span class="text-xs font-medium text-base-content/50">
-        {Gettext.gettext(PhoenixKitWeb.Gettext, "Layout")}
-      </span>
-      <%!-- The breakpoint switcher (grid-only bar — pixel mode has no tiers, so it
-      renders no Layout row at all; type is fixed at creation). --%>
-      <div class="join">
+      <div
+        role="tablist"
+        aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard layouts")}
+        class="flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto"
+      >
+        <%= for entry <- @entries do %>
+          <form
+            :if={@renaming_layout == entry["id"]}
+            phx-submit="rename_layout"
+            phx-value-id={entry["id"]}
+            class="shrink-0"
+          >
+            <input
+              type="text"
+              name="name"
+              value={entry["name"]}
+              maxlength="60"
+              class="input input-xs w-36"
+              autofocus
+              phx-keydown="cancel_rename_layout"
+              phx-key="escape"
+              phx-blur="cancel_rename_layout"
+            />
+          </form>
+          <button
+            :if={@renaming_layout != entry["id"]}
+            type="button"
+            role="tab"
+            aria-selected={to_string(@active_layout == entry["id"])}
+            phx-click="set_layout"
+            phx-value-id={entry["id"]}
+            class={[
+              "btn btn-xs max-w-40 shrink-0",
+              if(@active_layout == entry["id"], do: "btn-primary", else: "btn-ghost")
+            ]}
+            title={"#{entry["name"]} · #{entry["cols"]}×#{entry["rows"]}"}
+          >
+            <span class="truncate">{entry["name"]}</span>
+          </button>
+        <% end %>
+
         <button
-          :for={bp <- Breakpoints.all()}
           type="button"
-          phx-click="set_bp"
-          phx-value-bp={bp.key}
-          title={"#{bp_label(bp.key)} · #{bp.cols} " <> Gettext.gettext(PhoenixKitWeb.Gettext, "columns")}
-          class={["join-item btn btn-xs gap-1", @active_bp == bp.key && "btn-primary"]}
+          phx-click="add_layout"
+          class="btn btn-ghost btn-xs btn-square shrink-0"
+          title={Gettext.gettext(PhoenixKitWeb.Gettext, "Add a layout (copies the current one)")}
+          aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Add layout")}
         >
-          <.icon name={bp_icon(bp.key)} class="w-3.5 h-3.5" />
-          <span class="hidden sm:inline">{bp_label(bp.key)}</span>
+          <.icon name="hero-plus" class="w-3.5 h-3.5" />
         </button>
       </div>
 
-      <button
-        :if={@active_bp != Dashboards.home_bp(@dashboard) and Dashboards.customized?(@dashboard, @active_bp)}
-        type="button"
-        phx-click="reset_bp"
-        class="btn btn-ghost btn-xs gap-1"
-        title={Gettext.gettext(PhoenixKitWeb.Gettext, "Reset this breakpoint to auto")}
-      >
-        <.icon name="hero-arrow-path" class="w-3 h-3" />
-        {Gettext.gettext(PhoenixKitWeb.Gettext, "Reset")}
-      </button>
+      <%!-- Actions for the ACTIVE layout. --%>
+      <div class="dropdown dropdown-end shrink-0">
+        <button
+          type="button"
+          tabindex="0"
+          class="btn btn-ghost btn-xs btn-square"
+          aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Layout actions")}
+        >
+          <.icon name="hero-ellipsis-horizontal" class="w-4 h-4" />
+        </button>
+        <ul
+          tabindex="0"
+          class="dropdown-content menu z-30 w-44 rounded-box bg-base-100 p-2 shadow"
+        >
+          <li>
+            <button type="button" phx-click="start_rename_layout" phx-value-id={@active_layout}>
+              <.icon name="hero-pencil" class="w-3.5 h-3.5" />
+              {Gettext.gettext(PhoenixKitWeb.Gettext, "Rename")}
+            </button>
+          </li>
+          <li :if={length(@entries) > 1}>
+            <button
+              type="button"
+              phx-click="delete_layout"
+              phx-value-id={@active_layout}
+              data-confirm={
+                Gettext.gettext(
+                  PhoenixKitWeb.Gettext,
+                  "Delete this layout? Its placements are removed; the widgets stay available in the other layouts."
+                )
+              }
+              class="text-error"
+            >
+              <.icon name="hero-trash" class="w-3.5 h-3.5" />
+              {Gettext.gettext(PhoenixKitWeb.Gettext, "Delete")}
+            </button>
+          </li>
+        </ul>
+      </div>
 
-      <%!-- Per-tier grid dimensions. Columns always FIT horizontally (the grid
-      is laid out at the tier design width and fit-scaled — more columns just
-      means narrower cells); extra rows extend downward and the pane scrolls. --%>
+      <%!-- Per-layout grid dimensions. Columns always FIT horizontally (the
+      canvas scales to the pane); extra rows extend downward and scroll. --%>
       <div class="ml-auto flex items-center gap-3">
         <label class="flex cursor-pointer items-center gap-1.5">
           <span class="text-xs font-medium text-base-content/50">
@@ -893,12 +896,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         <.dim_control
           label={Gettext.gettext(PhoenixKitWeb.Gettext, "Columns")}
           dim="cols"
-          value={Dashboards.grid_cols(@dashboard, @active_bp)}
+          value={Dashboards.grid_cols(@dashboard, @active_layout)}
         />
         <.dim_control
           label={Gettext.gettext(PhoenixKitWeb.Gettext, "Rows")}
           dim="rows"
-          value={Dashboards.grid_rows(@dashboard, @active_bp)}
+          value={Dashboards.grid_rows(@dashboard, @active_layout)}
         />
       </div>
     </div>
@@ -940,45 +943,30 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     """
   end
 
-  # Grid mode — the active breakpoint, laid out at its design width and **fit-scaled
-  # to the available space** by `DashboardGridFit` (shrink-to-fit; fills in
-  # fullscreen). Fully editable at any scale: cell-drag via the module's
-  # `DashboardGridDrag` (transform-aware), corner resize via the scale-aware
-  # `DashboardResize`. A banner shows when the view isn't the viewer's own size.
+  # Grid mode — the active layout, laid out at its design width and fit-scaled
+  # to the pane by `DashboardGridFit`. Fully editable at any scale: cell-drag
+  # via `DashboardGridDrag` (screen-space metrics, transform-aware), corner
+  # resize via the scale-aware `DashboardResize`, or the Settings modal inputs.
   attr(:dashboard, :map, required: true)
   attr(:scope, :any, required: true)
-  attr(:active_bp, :string, required: true)
-  attr(:scaled, :boolean, required: true)
+  attr(:active_layout, :string, required: true)
   attr(:show_grid_lines, :boolean, required: true)
   attr(:empty, :boolean, default: false)
 
   defp grid_mode(assigns) do
-    bp = Breakpoints.get(assigns.active_bp) || Breakpoints.get(Breakpoints.default())
-
     assigns =
       assign(assigns,
-        items: Dashboards.resolve_items(assigns.dashboard, assigns.active_bp),
-        cols: Dashboards.grid_cols(assigns.dashboard, assigns.active_bp),
-        rows: Dashboards.grid_rows(assigns.dashboard, assigns.active_bp),
+        items: Dashboards.resolve_items(assigns.dashboard, assigns.active_layout),
+        cols: Dashboards.grid_cols(assigns.dashboard, assigns.active_layout),
+        rows: Dashboards.grid_rows(assigns.dashboard, assigns.active_layout),
         # Derived from the column count at a constant design-space cell size —
-        # more columns widen the canvas and the fit hook scales it down, so
+        # more columns widen the canvas and the fit hook rescales it, so
         # widget contents shrink uniformly and keep fitting.
-        preview_width: Dashboards.design_width(assigns.dashboard, assigns.active_bp),
-        bp_label: bp_label(bp.key)
+        preview_width: Dashboards.design_width(assigns.dashboard, assigns.active_layout)
       )
 
     ~H"""
     <div class="flex min-h-0 flex-1 flex-col">
-      <div
-        :if={@scaled}
-        class="flex items-center gap-2 border-b border-base-300 bg-info/10 px-4 py-1 text-xs text-base-content/60"
-      >
-        <.icon name="hero-magnifying-glass-minus" class="w-3.5 h-3.5 shrink-0" />
-        <span>
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "Editing the")} <b>{@bp_label}</b>
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "layout, scaled to fit your screen.")}
-        </span>
-      </div>
       <%!-- The canvas ALWAYS scales to fill the pane width — up or down, on
       every tier. On-screen size is purely pane-width / design-width; the
       design space itself is constant-density. --%>
@@ -1032,7 +1020,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
                 placement={placement}
                 scope={@scope}
                 mode="grid"
-                active_bp={@active_bp}
+                active_layout={@active_layout}
                 cols={@cols}
               />
             </div>
@@ -1101,7 +1089,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   attr(:scope, :any, required: true)
   attr(:mode, :string, required: true)
   attr(:placement, :map, default: nil)
-  attr(:active_bp, :string, default: nil)
+  attr(:active_layout, :string, default: nil)
   attr(:cols, :integer, default: nil)
 
   defp widget_card(assigns) do
@@ -1213,9 +1201,9 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # Resize bounds fed to the DashboardResize hook (as data-*). Grid: the resolved
   # placement span + the widget type's min/max clamped to the active breakpoint's
   # columns. Pixel: the default-bp span (unused by the pixel resize, which uses px).
-  defp card_limits(%{mode: "grid", inst: inst, placement: placement, active_bp: bp, cols: cols}) do
+  defp card_limits(%{mode: "grid", inst: inst, placement: placement, cols: cols}) do
     {min, max} = widget_size_bounds(inst)
-    cols = cols || Breakpoints.cols(bp)
+    cols = cols || 12
     p = placement || %{}
 
     %{
@@ -1238,8 +1226,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # clamped to that tier's column count — the settings modal passes the active
   # tier (and its dashboard-resolved column count) so its W input allows a full
   # row there.
-  defp size_limits(inst, bp \\ Breakpoints.default(), cols \\ nil) do
-    cols = cols || Breakpoints.cols(bp)
+  defp size_limits(inst, bp \\ "default", cols \\ nil) do
+    cols = cols || 12
     p = Layout.placement(inst, bp)
     w = p["w"] |> to_int(4) |> clamp(1, cols)
     h = p["h"] |> to_int(2) |> max(1)
@@ -1252,18 +1240,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   defp cell_coords(cols, rows) do
     for y <- 0..(rows - 1), x <- 0..(cols - 1), do: {x, y}
   end
-
-  # Breakpoint tier thresholds (largest→smallest) as JSON for the detect hook.
-  defp bp_thresholds do
-    Breakpoints.all() |> Enum.map(&%{k: &1.key, w: &1.min_width}) |> Jason.encode!()
-  end
-
-  # Device icon for the breakpoint switcher.
-  defp bp_icon("tv"), do: "hero-tv"
-  defp bp_icon("desktop"), do: "hero-computer-desktop"
-  defp bp_icon("ipad"), do: "hero-device-tablet"
-  defp bp_icon("phone"), do: "hero-device-phone-mobile"
-  defp bp_icon(_), do: "hero-squares-2x2"
 
   # Min/max span for an instance — the min follows its selected view when that
   # view declares one (mirrors the context's clamp); falls back to a permissive
@@ -1366,7 +1342,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   attr(:placement, :map, default: nil)
 
   defp widget_body(assigns) do
-    placement = assigns.placement || Layout.placement(assigns.inst, Breakpoints.default())
+    # Fallback (pixel mode): Layout.placement/2 returns span defaults for any id.
+    placement = assigns.placement || Layout.placement(assigns.inst, "default")
     widget = Registry.get(assigns.inst["widget_key"])
 
     assigns =
@@ -1498,7 +1475,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # Settings form generated from the widget type's settings_schema.
   attr(:instance, :map, required: true)
   attr(:mode, :string, required: true)
-  attr(:active_bp, :string, required: true)
+  attr(:active_layout, :string, required: true)
   attr(:grid_placement, :map, default: nil)
   attr(:cols, :integer, required: true)
   attr(:max_rows, :integer, required: true)
@@ -1509,12 +1486,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
     # Show the RESOLVED size for the tier being edited (matches what's on screen, incl.
     # derived tiers) so saving doesn't overwrite a derived size with the default.
-    grid = assigns.grid_placement || Layout.placement(assigns.instance, assigns.active_bp)
+    grid = assigns.grid_placement || Layout.placement(assigns.instance, assigns.active_layout)
 
     assigns =
       assign(assigns,
         widget: widget,
-        limits: size_limits(assigns.instance, assigns.active_bp, assigns.cols),
+        limits: size_limits(assigns.instance, assigns.active_layout, assigns.cols),
         free?: assigns.mode == "free",
         free_min_px: @free_min_px,
         free_max_px: @free_max_px,

@@ -270,12 +270,9 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert {:ok, small} = Dashboards.resize_widget(dashboard, id, "desktop", 0, 0)
       assert %{"w" => 2, "h" => 1} = Layout.placement(hd(small.layout), "desktop")
 
-      # Desktop = 12 cols → clamps to 12; phone = 4 cols → clamps to 4.
+      # The layout has 12 cols → the span clamps to 12.
       assert {:ok, big} = Dashboards.resize_widget(dashboard, id, "desktop", 99, 99)
       assert %{"w" => 12, "h" => 8} = Layout.placement(hd(big.layout), "desktop")
-
-      assert {:ok, phone} = Dashboards.resize_widget(dashboard, id, "phone", 99, 2)
-      assert %{"w" => 4} = Layout.placement(hd(phone.layout), "phone")
     end
 
     test "the resize floor follows the instance's selected VIEW (per-view min_size)", %{
@@ -403,7 +400,7 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert {:ok, _} = Dashboards.place_widget_grid(d, id, "desktop", 4, 2)
     end
 
-    test "add_widget_at drops a catalog widget at the given cell and marks the tier designed",
+    test "add_widget_at drops a catalog widget at the given cell",
          %{dashboard: d} do
       assert {:ok, added} = Dashboards.add_widget_at(d, "core.clock", "desktop", 5, 4)
 
@@ -411,7 +408,6 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert clock["widget_key"] == "core.clock"
       # core.clock default 3x2, placed exactly where dropped.
       assert %{"x" => 5, "y" => 4, "w" => 3, "h" => 2} = Layout.placement(clock, "desktop")
-      assert Dashboards.customized?(added, "desktop")
 
       assert_activity_logged("dashboard.widget_added",
         resource_uuid: d.uuid,
@@ -448,17 +444,23 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert %{"fx" => 0, "fy" => 0} = Layout.pixel(List.last(added2.layout))
     end
 
-    test "the first edit of a derived tier persists its materialization even when nothing changes",
-         %{dashboard: d, id: id} do
-      # TV derives from the desktop home. Resizing it to EXACTLY the derived size
-      # must still pin + persist the tier (Ecto change/2 vs the pre-mutated
+    test "the first edit of a packed-at-render placement pins + persists it",
+         %{dashboard: d} do
+      # A second layout; then a NEW widget seeded only into the first layout —
+      # in the second it packs at render. Resizing it there to EXACTLY the
+      # packed size must still pin + persist (Ecto change/2 vs the pre-mutated
       # struct skipped this write before the force_change fix).
-      derived = Dashboards.resolve_placement(d, id, "tv")
-      {:ok, _} = Dashboards.resize_widget(d, id, "tv", derived["w"], derived["h"])
+      {:ok, d, entry} = Dashboards.add_layout(d, "desktop")
+      {:ok, d} = Dashboards.add_widget(d, "core.clock")
+      clock = List.last(d.layout)
+      refute get_in(clock, ["bp", entry["id"]])
+
+      packed = Dashboards.resolve_placement(d, clock["id"], entry["id"])
+      {:ok, _} = Dashboards.resize_widget(d, clock["id"], entry["id"], packed["w"], packed["h"])
 
       stored = Dashboards.get(d.uuid)
-      assert %{"x" => _, "y" => _} = get_in(hd(stored.layout), ["bp", "tv"])
-      assert Dashboards.customized?(stored, "tv")
+      stored_clock = List.last(stored.layout)
+      assert %{"x" => _, "y" => _} = get_in(stored_clock, ["bp", entry["id"]])
     end
   end
 
@@ -469,21 +471,17 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       %{dashboard: dashboard}
     end
 
-    test "defaults come from the tier", %{dashboard: d} do
+    test "defaults come from the layout entry", %{dashboard: d} do
       assert Dashboards.grid_cols(d, "desktop") == 12
-      assert Dashboards.grid_cols(d, "phone") == 4
       assert Dashboards.grid_rows(d, "desktop") == 15
-      assert Dashboards.grid_rows(d, "tv") == 8
+      # Unknown ids fall back to the module defaults.
+      assert Dashboards.grid_cols(d, "ghost") == 12
+      assert Dashboards.grid_rows(d, "ghost") == 15
     end
 
-    test "adding a column/row stores a per-tier override, persists, and marks customized", %{
-      dashboard: d
-    } do
+    test "adding a column/row updates the layout entry and persists", %{dashboard: d} do
       assert {:ok, d1} = Dashboards.resize_grid(d, "desktop", :cols, 1)
       assert Dashboards.grid_cols(d1, "desktop") == 13
-      # Other tiers keep their defaults.
-      assert Dashboards.grid_cols(d1, "phone") == 4
-      assert Dashboards.customized?(d1, "desktop")
 
       assert {:ok, d2} = Dashboards.resize_grid(d1, "desktop", :rows, 1)
       assert Dashboards.grid_rows(d2, "desktop") == 16
@@ -492,14 +490,14 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       reloaded = Dashboards.get(d.uuid)
       assert Dashboards.grid_cols(reloaded, "desktop") == 13
       assert Dashboards.grid_rows(reloaded, "desktop") == 16
+
+      # Unknown layout ids are a no-op.
+      assert {:ok, _} = Dashboards.resize_grid(d2, "ghost", :cols, 1)
     end
 
-    test "a later per-widget edit keeps the dimension override (merge, not replace)", %{
-      dashboard: d
-    } do
+    test "a later per-widget edit keeps the layout's dimensions", %{dashboard: d} do
       {:ok, d1} = Dashboards.resize_grid(d, "desktop", :cols, 1)
       [%{"id" => id}] = d1.layout
-      # A placement edit runs mark_customized on the same tier map.
       {:ok, d2} = Dashboards.place_widget_grid(d1, id, "desktop", 2, 2)
       assert Dashboards.grid_cols(d2, "desktop") == 13
     end
@@ -542,11 +540,13 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert %{"x" => 9} = Layout.placement(hd(placed.layout), "desktop")
     end
 
-    test "reset_breakpoint clears dimension overrides on a non-home tier", %{dashboard: d} do
-      {:ok, d1} = Dashboards.resize_grid(d, "phone", :cols, 1)
-      assert Dashboards.grid_cols(d1, "phone") == 5
-      {:ok, d2} = Dashboards.reset_breakpoint(d1, "phone")
-      assert Dashboards.grid_cols(d2, "phone") == 4
+    test "deleting a layout removes its dimensions with it", %{dashboard: d} do
+      {:ok, d1, entry} = Dashboards.add_layout(d, "desktop")
+      {:ok, d2} = Dashboards.resize_grid(d1, entry["id"], :cols, 1)
+      assert Dashboards.grid_cols(d2, entry["id"]) == 13
+      {:ok, d3} = Dashboards.delete_layout(d2, entry["id"])
+      # Back to the fallback default for the unknown id.
+      assert Dashboards.grid_cols(d3, entry["id"]) == 12
     end
   end
 
@@ -733,137 +733,107 @@ defmodule PhoenixKitDashboards.DashboardsTest do
     end
   end
 
-  describe "responsive breakpoints" do
+  describe "layouts (user-defined grids)" do
     setup do
-      {:ok, d0} = Dashboards.create(%{title: "Resp", scope: "system"})
+      {:ok, d0} = Dashboards.create(%{title: "Lay", scope: "system"})
       {:ok, d1} = Dashboards.add_widget(d0, "core.note")
-      # Widen it to 10 cols on desktop so phone derivation must clamp.
       [%{"id" => id}] = d1.layout
       {:ok, d2} = Dashboards.resize_widget(d1, id, "desktop", 10, 2)
       %{dashboard: d2, id: id}
     end
 
-    test "a tier is auto until edited; editing marks it custom", %{dashboard: d} do
-      # `d`'s desktop tier was resized in setup → custom; every other tier is auto.
-      assert Dashboards.customized?(d, "desktop")
-      refute Dashboards.customized?(d, "tv")
-      refute Dashboards.customized?(d, "ipad")
-      refute Dashboards.customized?(d, "phone")
+    test "a fresh dashboard adapts to a single legacy default layout", %{dashboard: d} do
+      assert [%{"id" => "desktop", "name" => "Desktop", "cols" => 12, "rows" => 15}] =
+               Dashboards.layouts(d)
+
+      assert Dashboards.first_layout_id(d) == "desktop"
+      assert Dashboards.get_layout(d, "nope") == nil
     end
 
-    test "an auto tier derives from the customized one, clamping the span to its columns",
+    test "legacy customized tiers adapt to layouts named after the tier" do
+      {:ok, d} =
+        Dashboards.create(%{
+          title: "Legacy",
+          scope: "system",
+          config: %{"home_bp" => "desktop", "breakpoints" => %{"phone" => %{"state" => "custom"}}}
+        })
+
+      assert [
+               %{"id" => "desktop", "name" => "Desktop", "cols" => 12},
+               %{"id" => "phone", "name" => "Phone", "cols" => 4, "rows" => 36}
+             ] = Dashboards.layouts(d)
+    end
+
+    test "add_layout copies the source dims + placements and persists", %{dashboard: d, id: id} do
+      assert {:ok, d2, entry} = Dashboards.add_layout(d, "desktop")
+      assert entry["name"] == "Layout 1"
+      assert entry["cols"] == 12 and entry["rows"] == 15
+
+      # Seeded: the widget carries the SAME placement under the new layout id.
+      src = Dashboards.resolve_placement(d2, id, "desktop")
+      seeded = Dashboards.resolve_placement(d2, id, entry["id"])
+      assert Map.take(seeded, ~w(x y w h)) == Map.take(src, ~w(x y w h))
+
+      # Persisted (config gains the layouts list, snapshotting the legacy one).
+      reloaded = Dashboards.get(d.uuid)
+      assert [%{"id" => "desktop"}, %{"id" => new_id}] = Dashboards.layouts(reloaded)
+      assert new_id == entry["id"]
+    end
+
+    test "rename_layout renames (blank ignored) and persists", %{dashboard: d} do
+      {:ok, d, entry} = Dashboards.add_layout(d, "desktop")
+      {:ok, d} = Dashboards.rename_layout(d, entry["id"], "  Wall TV  ")
+      assert Dashboards.get_layout(d, entry["id"])["name"] == "Wall TV"
+
+      {:ok, same} = Dashboards.rename_layout(d, entry["id"], "   ")
+      assert Dashboards.get_layout(same, entry["id"])["name"] == "Wall TV"
+
+      assert Dashboards.get_layout(Dashboards.get(d.uuid), entry["id"])["name"] == "Wall TV"
+    end
+
+    test "delete_layout strips per-widget placements; the last layout is protected",
+         %{dashboard: d, id: id} do
+      assert {:error, :last_layout} = Dashboards.delete_layout(d, "desktop")
+
+      {:ok, d, entry} = Dashboards.add_layout(d, "desktop")
+      assert get_in(hd(d.layout), ["bp", entry["id"]])
+
+      {:ok, d} = Dashboards.delete_layout(d, entry["id"])
+      assert [%{"id" => "desktop"}] = Dashboards.layouts(d)
+      refute get_in(hd(d.layout), ["bp", entry["id"]])
+      # The widget lives on in the remaining layout.
+      assert [{%{"id" => ^id}, _p}] = Dashboards.resolve_items(d, "desktop")
+
+      # Unknown id is a no-op.
+      assert {:ok, _} = Dashboards.delete_layout(d, "ghost")
+    end
+
+    test "a widget without a stored placement packs first-fit (clamped) at render",
          %{dashboard: d} do
-      # Desktop (customized, w=10) is the source; larger/smaller tiers derive from it.
-      assert [{_i, %{"w" => 10}}] = Dashboards.resolve_items(d, "desktop")
-      assert [{_i, %{"w" => 10}}] = Dashboards.resolve_items(d, "tv")
-      assert [{_i, %{"w" => 8}}] = Dashboards.resolve_items(d, "ipad")
-      assert [{_i, %{"w" => 4}}] = Dashboards.resolve_items(d, "phone")
+      # Second layout, then a new widget seeded only into the FIRST layout.
+      {:ok, d, entry} = Dashboards.add_layout(d, "desktop")
+      {:ok, d} = Dashboards.add_widget(d, "core.clock")
+      clock = List.last(d.layout)
+      refute get_in(clock, ["bp", entry["id"]])
+
+      # It still renders in the second layout — packed into a free cell.
+      items = Dashboards.resolve_items(d, entry["id"])
+      assert length(items) == 2
+      {_c, packed} = Enum.find(items, fn {i, _} -> i["id"] == clock["id"] end)
+      assert is_integer(packed["x"]) and is_integer(packed["y"])
+      # resolve_placement mirrors the render exactly.
+      assert Dashboards.resolve_placement(d, clock["id"], entry["id"]) == packed
     end
 
-    test "a non-home tier derives from the home/designed tier, keeping placement" do
-      # Made on a phone → phone is the home (designed) tier; larger tiers are auto.
-      {:ok, d0} =
-        Dashboards.create(%{title: "Up", scope: "system", config: %{"home_bp" => "phone"}})
+    test "hide_widget hides on one layout only", %{dashboard: d, id: id} do
+      {:ok, d, entry} = Dashboards.add_layout(d, "desktop")
+      {:ok, d} = Dashboards.hide_widget(d, id, entry["id"], true)
 
-      {:ok, d1} = Dashboards.add_widget(d0, "core.note")
-      [%{"id" => id}] = d1.layout
-      {:ok, d2} = Dashboards.resize_widget(d1, id, "phone", 3, 5)
-
-      assert Dashboards.home_bp(d2) == "phone"
-      assert Dashboards.customized?(d2, "phone")
-      refute Dashboards.customized?(d2, "desktop")
-
-      # Stepping UP to an un-designed larger tier shows the SAME placement (span
-      # kept, height carried) — the space just grew; it isn't re-flowed.
-      assert [{_i, %{"w" => 3, "h" => 5}}] = Dashboards.resolve_items(d2, "desktop")
-      assert [{_i, %{"w" => 3, "h" => 5}}] = Dashboards.resolve_items(d2, "tv")
-    end
-
-    test "editing a tier marks it customized and stops deriving", %{dashboard: d, id: id} do
-      {:ok, d} = Dashboards.resize_widget(d, id, "phone", 2, 1)
-      assert Dashboards.customized?(d, "phone")
-      assert [{_i, %{"w" => 2, "h" => 1}}] = Dashboards.resolve_items(d, "phone")
-      # Desktop is untouched by the phone edit.
-      assert [{_i, %{"w" => 10}}] = Dashboards.resolve_items(d, "desktop")
-    end
-
-    test "hide_widget hides on a tier only; reset re-derives", %{dashboard: d, id: id} do
-      {:ok, d} = Dashboards.hide_widget(d, id, "phone", true)
-      assert Dashboards.resolve_hidden?(d, id, "phone")
+      assert Dashboards.resolve_hidden?(d, id, entry["id"])
       refute Dashboards.resolve_hidden?(d, id, "desktop")
       # Runtime filters hidden; builder (default) keeps them.
-      assert Dashboards.resolve_items(d, "phone", visible: true) == []
-      assert length(Dashboards.resolve_items(d, "phone")) == 1
-
-      {:ok, d} = Dashboards.reset_breakpoint(d, "phone")
-      refute Dashboards.customized?(d, "phone")
-      refute Dashboards.resolve_hidden?(d, id, "phone")
-      assert [{_i, %{"w" => 4}}] = Dashboards.resolve_items(d, "phone")
-    end
-
-    test "the default breakpoint can't be reset", %{dashboard: d} do
-      {:ok, same} = Dashboards.reset_breakpoint(d, "desktop")
-      assert Dashboards.customized?(same, "desktop")
-    end
-
-    test "editing a derived tier snapshots it — the derived geometry isn't lost" do
-      {:ok, d0} = Dashboards.create(%{title: "Mat", scope: "system"})
-      {:ok, d1} = Dashboards.add_widget(d0, "core.note")
-      [%{"id" => id}] = d1.layout
-      # Home = desktop; give it a distinctive shape there.
-      {:ok, d2} = Dashboards.resize_widget(d1, id, "desktop", 6, 3)
-      # TV (un-designed) derives from the desktop home → w6 (fits 16), h3.
-      assert [{_i, %{"w" => 6, "h" => 3}}] = Dashboards.resolve_items(d2, "tv")
-
-      # Hide on TV (first edit → TV becomes custom). Without the snapshot the widget
-      # would snap to the default (w4/h2) since it has no stored TV placement.
-      {:ok, d3} = Dashboards.hide_widget(d2, id, "tv", true)
-      assert [{_i, %{"w" => 6, "h" => 3, "hidden" => true}}] = Dashboards.resolve_items(d3, "tv")
-    end
-
-    test "display_bp shows the screen's tier if designed, else the nearest designed one" do
-      # Home = desktop (designed); phone/ipad/tv are auto.
-      {:ok, d0} = Dashboards.create(%{title: "Disp", scope: "system"})
-      {:ok, d1} = Dashboards.add_widget(d0, "core.note")
-
-      # A designed screen → itself; an un-designed screen → the nearest designed (home).
-      assert Dashboards.display_bp(d1, "desktop") == "desktop"
-      assert Dashboards.display_bp(d1, "phone") == "desktop"
-      assert Dashboards.display_bp(d1, "tv") == "desktop"
-
-      # Once phone is designed, a phone screen shows phone (not the scaled desktop).
-      [%{"id" => id}] = d1.layout
-      {:ok, d2} = Dashboards.resize_widget(d1, id, "phone", 2, 1)
-      assert Dashboards.display_bp(d2, "phone") == "phone"
-      # iPad (still auto) picks the nearest designed — desktop (nearer than phone).
-      assert Dashboards.display_bp(d2, "ipad") == "desktop"
-    end
-
-    test "resolve_placement returns the DERIVED size on an auto tier (matches the render)" do
-      {:ok, d0} = Dashboards.create(%{title: "RP", scope: "system"})
-      {:ok, d1} = Dashboards.add_widget(d0, "core.note")
-      [%{"id" => id}] = d1.layout
-      {:ok, d2} = Dashboards.resize_widget(d1, id, "desktop", 10, 5)
-
-      # TV (auto) derives from desktop → w10 (fits 16), h5 — NOT the default 4x2.
-      assert %{"w" => 10, "h" => 5} = Dashboards.resolve_placement(d2, id, "tv")
-      assert %{"w" => 10, "h" => 5} = Dashboards.resolve_placement(d2, id, "desktop")
-      assert Dashboards.resolve_placement(d2, "nope", "tv") == nil
-    end
-
-    test "put_home_bp records the home only for a fresh, empty dashboard" do
-      {:ok, fresh} = Dashboards.create(%{title: "Fresh", scope: "system"})
-      {:ok, fresh} = Dashboards.put_home_bp(fresh, "phone")
-      assert Dashboards.home_bp(fresh) == "phone"
-
-      # Once it has a home (or any widgets), it won't move under another viewer.
-      {:ok, fresh} = Dashboards.put_home_bp(fresh, "tv")
-      assert Dashboards.home_bp(fresh) == "phone"
-
-      {:ok, used} = Dashboards.create(%{title: "Used", scope: "system"})
-      {:ok, used} = Dashboards.add_widget(used, "core.note")
-      {:ok, used} = Dashboards.put_home_bp(used, "phone")
-      assert Dashboards.home_bp(used) == "desktop"
+      assert Dashboards.resolve_items(d, entry["id"], visible: true) == []
+      assert length(Dashboards.resolve_items(d, entry["id"])) == 1
     end
   end
 end

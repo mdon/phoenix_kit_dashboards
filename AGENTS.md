@@ -139,75 +139,30 @@ atomic — a widget item is `%{id, widget_key, settings, view, "pixel" => %{fx,f
 and fall back to the legacy flat shape (`pos` is the legacy-order tiebreaker; items
 without stored `x`/`y` are packed at render and pinned on their first edit).
 
-- **`"grid"` — responsive breakpoints with EXPLICIT CELL PLACEMENT.** Tiers
-  (`PhoenixKitDashboards.Breakpoints`, largest→smallest): **TV ≥1920 = 16 cols,
-  Desktop ≥1280 = 12, iPad ≥768 = 8, Phone <768 = 4** — a tier is JUST its
-  column count + designable rows; there is **no per-tier design width**. The
-  canvas width derives from the column count at a **constant SQUARE
-  design-space cell (89x89px + 12px gap)** via `Breakpoints.design_width/1`
-  (12 cols → the classic 1200px), so the widget contract's density never
-  changes: adding columns widens the canvas and `DashboardGridFit` scales the
-  whole thing down — widget contents shrink uniformly and always keep fitting.
-  Per-dashboard per-tier **dimension overrides** (builder Layout-bar Columns/
-  Rows ± controls, `config["breakpoints"][bp]["cols"|"rows"]`, cols 1..24 =
-  `Breakpoints.max_grid_cols/0`, rows 1..50) are honored by every placement/
-  render path via `Dashboards.grid_cols/2` + `grid_rows/2`; shrinking under a
-  placed widget is refused. Widget span caps sanitize against
-  `max_grid_cols/0` (24). The canvas ALWAYS scales to fill the pane width —
-  up or down, on every tier (no 1:1 cap, no native-tier special case; the
-  old `data-fill` attribute is gone). A **Show-grid toggle** (session-local) renders the empty cells as
-  soft tiles (borderless `bg-base-content/[0.04]`, radius below the cards —
-  quorum-picked); the grid surface renders even on an EMPTY board (hint floats
-  over it) so the toggle and catalog drag-drop work there.
-  A placement is `%{x, y, w, h, hidden}` — `x`/`y` are 0-based cells; a widget goes
-  ANYWHERE (gaps allowed, that's the point), widgets never overlap
-  (`PhoenixKitDashboards.Grid` owns the occupancy/packing/fit math). Each tier has
-  its own **designable surface** (`Breakpoints.max_rows/1`: TV 8, desktop 15,
-  iPad 24, phone 36 — the builder renders + scrolls ALL of it so a widget can be
-  placed on any row up front; `Grid.max_rows/0` = 50 is only the hard bound that
-  derived-tier packing may overflow into, and overflowing content still renders).
-  Each breakpoint has its own layout: edits
-  (move/resize/hide) act on the **active** breakpoint and flip it to customized —
-  `materialize_grid` first pins every widget's resolved cells so editing one can't
-  shift the rest (and `save_customized` must FORCE the layout write: the struct was
-  pre-mutated in memory, so a plain Ecto `change/2` would diff against it and
-  silently skip persisting when the edit equals the derived values). Placements
-  that predate explicit cells (order-only `pos` data) pack first-fit around the
-  placed ones at render, no migration. An un-customized breakpoint is
-  **auto-derived** from the nearest customized one **in either direction** by
-  **reflow + compact** (its widgets in reading order, spans clamped to the target
-  columns, packed first-fit). A dashboard has a **home tier** (`home_bp/1` =
-  `config["home_bp"]`, set from the creator's screen on first open via
-  `put_home_bp/2`; defaults desktop). The home tier is always a **designed** view
-  (`customized?/2` = state custom **or** the home) and is the seed (`add_widget`
-  seeds `bp[home]` at the first free cell) + derivation anchor; it can't be reset.
-  `Dashboards.resolve_items/3` is the single render path — every placement it
-  returns carries explicit cells (`visible: true` filters hidden; hidden widgets
-  keep occupying their cells).
-
-  **Always fit-scaled + editable.** The grid is laid out at its tier's design width
-  and scaled to the available space by **`DashboardGridFit`** (shrink-to-fit for a
-  DIFFERENT tier's preview; **fills** — scaling past 1:1 — on the viewer's NATIVE
-  tier, `data-fill`, and in fullscreen). It's
-  **editable at any scale**: corner-resize via the scale-aware `DashboardResize`;
-  cell placement by dragging via the module's `DashboardGridDrag` (screen-space
-  metrics, so it's transform-aware at any scale) or the Settings modal's
-  Column/Row inputs. So an employee on a phone can fix the *TV* layout: tap
-  TV, and edit it shrunk-to-fit. **On open** (the
-  **`DashboardBreakpoint`** hook reports the screen tier once, `detect_bp`) we only
-  ever show a *designed* view (`display_bp/2` = the screen tier if designed, else the
-  nearest designed one) — never a freshly-derived one; hosts passing
-  `viewport_width` in the LiveSocket connect params (README) skip the hook
-  round-trip entirely and mount straight into the right tier. `scaled?` (view ≠
-  the viewer's own size) drives the banner. The **catalog** is a slide-over panel
-  in BOTH modes: always rendered but hidden, toggled client-side (`JS.toggle`, so
-  opening is instant), entries grouped by providing module, and it hides itself
-  while a catalog drag is off-panel so cells under it can take the drop
-  (releasing over the visible panel cancels). The **full-screen** button lives in
-  the title row for both modes (`DashboardFullscreen` → requests fullscreen on
-  the fit container; a `fullscreenchange` re-fits to fill). The whole grid pane
-  is held hidden (a spinner + "fitting…" text; `<noscript>` reveal) until the
-  tier resolves, so the switcher never animates desktop→tv.
+- **`"grid"` — USER-DEFINED LAYOUTS with EXPLICIT CELL PLACEMENT.** A grid
+  dashboard is an ordered list of named layouts in `config["layouts"]`
+  (`[%{"id","name","cols","rows"}]`, `Dashboards.layouts/1`); the builder
+  shows them as a tab strip (`[Desktop] [Wall TV] [+]` + an actions dropdown
+  with Rename/Delete on the active tab). "+" instant-creates "Layout N"
+  copying the active layout's dims + placements (doubles as duplicate) and
+  drops into inline rename. The last layout can't be deleted; deleting one
+  strips its per-widget placements (widgets are dashboard-level and live on
+  elsewhere). Per-layout Columns/Rows ± controls (cols 1..24 =
+  `Breakpoints.max_grid_cols/0`, rows 1..50); shrinking under a placed widget
+  is refused. **No device tiers, no auto-derivation, no viewport detection,
+  no loading state** — a dashboard opens instantly on its first layout (or
+  the `?layout=<id>` deep link; unknown ids fall back). Widgets never overlap;
+  a widget without a stored placement in a layout packs first-fit at render
+  (default span) and pins on first edit. **Constant SQUARE design cell
+  (89×89px + 12px gap)**: canvas width = `Breakpoints.design_width(cols)`
+  (12 → the classic 1200px) and the fit hook ALWAYS scales the canvas to
+  fill the pane width — so widget contents shrink/grow uniformly and keep
+  fitting at any column count. LEGACY: pre-layouts dashboards adapt in
+  memory — designed tiers become layouts whose id IS the old tier key
+  ("desktop", "phone", …), zero widget-data rewriting; the list persists on
+  the first layout mutation. A session-local **Show-grid toggle** renders
+  empty cells as soft tiles (borderless `bg-base-content/[0.04]`); the grid
+  surface renders even on an EMPTY board (hint floats over it).
 - **`"pixel"` — an absolute pixel canvas**: drag/resize anywhere, exact px in
   `pixel.fx/fy/fw/fh`, no snapping. Widgets may **overlap deliberately** — each
   widget bar has bring-to-front / send-to-back (`restack_widget_px/3`, a `"z"`

@@ -9,8 +9,8 @@
 //   DashboardGridDrag  — grid cell placement (drag a widget to any free cell)
 //   DashboardFreeDrag  — pixel-canvas move (left/top px)
 //   DashboardResize    — corner resize (cells in grid, px in pixel mode)
-//   DashboardGridFit / DashboardFreeFit / DashboardFullscreen / DashboardBreakpoint
-//                      — fit-scaling, fullscreen and tier detection helpers
+//   DashboardGridFit / DashboardFreeFit / DashboardFullscreen
+//                      — fit-scaling and fullscreen helpers
 window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
 (function () {
@@ -1236,29 +1236,4 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     },
   };
 
-  // `DashboardBreakpoint` — on connect, matches the viewport width against the tier
-  // thresholds (from `data-breakpoints`, ordered largest→smallest) and pushes
-  // `detect_bp` ONCE so a grid dashboard opens at the tier that best fits the screen
-  // and stays there. The grid is hidden until this settles, so no wrong-tier flash.
-  window.PhoenixKitDashboardsHooks.DashboardBreakpoint = {
-    mounted() {
-      var tiers = [];
-      try {
-        tiers = JSON.parse(this.el.getAttribute("data-breakpoints") || "[]");
-      } catch (e) {
-        tiers = [];
-      }
-
-      var w = window.innerWidth;
-      var bp = tiers.length ? tiers[tiers.length - 1].k : null;
-      for (var i = 0; i < tiers.length; i++) {
-        if (w >= tiers[i].w) {
-          bp = tiers[i].k;
-          break;
-        }
-      }
-
-      if (bp) this.pushEvent("detect_bp", { bp: bp });
-    },
-  };
 })();

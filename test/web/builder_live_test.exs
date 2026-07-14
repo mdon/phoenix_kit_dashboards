@@ -178,90 +178,78 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       refute html =~ ~s(phx-hook="DashboardGrid")
     end
 
-    test "a grid dashboard shows a loading state until the best-fit tier is detected", %{
+    test "opens instantly on the first layout — no detection, no loading state", %{
       conn: conn
     } do
       {conn, user} = sign_in(conn)
       dashboard = fixture_dashboard(user.uuid)
       {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
 
-      {:ok, view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-      # Before the hook reports: spinner shown, grid pane hidden (so the switcher
-      # never animates from the default tier to the detected one).
-      assert html =~ "loading-spinner"
-      assert html =~ ~r/pk-grid-ready[^"]*\bhidden\b/
-
-      # Once the tier is detected the grid reveals (no longer hidden).
-      html = render_hook(view, "detect_bp", %{"bp" => "tv"})
-      refute html =~ ~r/pk-grid-ready[^"]*\bhidden\b/
-    end
-
-    test "viewport_width connect params load straight into the right tier — no loading state",
-         %{conn: conn} do
-      {conn, user} = sign_in(conn)
-      # Designed at TV (home recorded before the first widget seeds it).
-      dashboard = fixture_dashboard(user.uuid)
-      {:ok, dashboard} = Dashboards.put_home_bp(dashboard, "tv")
-      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
-
-      conn = put_connect_params(conn, %{"viewport_width" => 2200})
-      {:ok, view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-
-      # First live render: already revealed at the TV tier (2200px), no spinner
-      # phase — the tier was resolved server-side at mount.
-      refute html =~ ~r/pk-grid-ready[^"]*\bhidden\b/
-      assert html =~ ~s(data-cols="16")
-      refute html =~ "scaled to fit"
-
-      # A late hook report is the fallback path arriving twice — ignored.
-      html = render_hook(view, "detect_bp", %{"bp" => "phone"})
-      assert html =~ ~s(data-cols="16")
-      refute html =~ "scaled to fit"
-
-      # Hostile tier keys are no-ops on both entry points.
-      html = render_hook(view, "detect_bp", %{"bp" => "8k-cinema"})
-      assert html =~ ~s(data-cols="16")
-      html = render_hook(view, "set_bp", %{"bp" => "8k-cinema"})
-      assert html =~ ~s(data-cols="16")
-    end
-
-    test "a phone-width viewport shows the nearest designed view scaled, catalog closed",
-         %{conn: conn} do
-      {conn, user} = sign_in(conn)
-      dashboard = fixture_dashboard(user.uuid)
-      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
-
-      conn = put_connect_params(conn, %{"viewport_width" => 390})
       {:ok, _view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-
-      # Phone isn't designed → nearest designed (desktop home) scaled to fit
-      # (the canvas always fills the pane width; the banner tells the user
-      # they're editing another tier's layout). Catalog starts hidden.
-      assert html =~ "scaled to fit"
+      # The grid renders immediately (legacy default layout: Desktop 12 cols),
+      # editable, with the fit + drag + resize hooks in place.
+      refute html =~ "loading-spinner"
+      refute html =~ "DashboardBreakpoint"
+      assert html =~ ~s(data-cols="12")
+      assert html =~ "DashboardGridFit"
+      assert html =~ ~s(phx-hook="DashboardGridDrag")
+      assert html =~ ~s(phx-hook="DashboardResize")
+      # The layout tab strip with the adapted legacy layout + the add button.
+      assert html =~ "Desktop"
+      assert html =~ ~s(phx-click="add_layout")
+      # Catalog starts hidden.
       assert html =~ ~r/id="dashboard-catalog"[^>]*style="display: none"/
     end
 
-    test "a size you didn't design shows the nearest designed view scaled — but editable", %{
-      conn: conn
-    } do
+    test "the ?layout= deep link opens that layout; unknown ids fall back", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
+      {:ok, dashboard, entry} = Dashboards.add_layout(dashboard, "desktop")
+      {:ok, dashboard} = Dashboards.rename_layout(dashboard, entry["id"], "Wall TV")
+      {:ok, dashboard} = Dashboards.resize_grid(dashboard, entry["id"], :cols, 1)
+
+      {:ok, _view, html} =
+        live(conn, "/en/admin/dashboards/#{dashboard.uuid}?layout=#{entry["id"]}")
+
+      assert html =~ ~s(data-cols="13")
+
+      {:ok, _view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}?layout=ghost")
+      assert html =~ ~s(data-cols="12")
+    end
+
+    test "layout tabs: add creates + activates + enters rename mode; rename and delete work",
+         %{conn: conn} do
       {conn, user} = sign_in(conn)
       dashboard = fixture_dashboard(user.uuid)
       {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
 
       {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
 
-      # Phone isn't designed → show the desktop home scaled-to-fit, WITH a banner —
-      # and still fully editable (reorder + resize hooks present under the fit).
-      html = render_hook(view, "detect_bp", %{"bp" => "phone"})
-      assert html =~ "DashboardGridFit"
-      assert html =~ "scaled to fit"
-      assert html =~ ~s(phx-hook="DashboardGridDrag")
-      assert html =~ ~s(phx-hook="DashboardResize")
+      # "+" creates a copy of the active layout and drops into rename mode.
+      html = render_click(view, "add_layout", %{})
+      assert html =~ "Layout 1"
+      assert html =~ ~s(phx-submit="rename_layout")
 
-      # Tapping your own size drops the "scaled" banner (it's your native size).
-      html = render_hook(view, "set_bp", %{"bp" => "phone"})
-      refute html =~ "scaled to fit"
-      assert html =~ ~s(phx-hook="DashboardGridDrag")
+      new_id =
+        Dashboards.get(dashboard.uuid) |> Dashboards.layouts() |> List.last() |> Map.get("id")
+
+      # Rename commits and leaves rename mode.
+      html = render_submit(view, "rename_layout", %{"id" => new_id, "name" => "Portrait"})
+      assert html =~ "Portrait"
+      refute html =~ ~s(phx-submit="rename_layout")
+
+      # Deleting the active layout falls back to the first one.
+      html = render_click(view, "delete_layout", %{"id" => new_id})
+      refute html =~ "Portrait"
+      assert html =~ ~s(data-cols="12")
+
+      # The last layout is protected.
+      html = render_click(view, "delete_layout", %{"id" => "desktop"})
+      assert html =~ "at least one layout"
+
+      # Hostile ids are no-ops.
+      assert render_click(view, "set_layout", %{"id" => "ghost"}) =~ ~s(data-cols="12")
     end
 
     test "reorder_widgets event persists the new order", %{conn: conn} do
@@ -616,47 +604,53 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       assert %{"w" => 7, "h" => 4} = grid(dashboard.uuid)
     end
 
-    test "on a DERIVED tier the modal shows the resolved size (save doesn't shrink it)", %{
-      conn: conn
-    } do
+    test "on a PACKED placement the modal shows the resolved size (save doesn't shrink it)",
+         %{conn: conn} do
       {conn, user} = sign_in(conn)
       dashboard = fixture_dashboard(user.uuid)
       {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
       [%{"id" => id}] = dashboard.layout
       {:ok, dashboard} = Dashboards.resize_widget(dashboard, id, "desktop", 10, 5)
+      # A second layout, then STRIP the widget's stored placement there so the
+      # layout renders it packed-at-render (the modal must show the packed size).
+      {:ok, dashboard, entry} = Dashboards.add_layout(dashboard, "desktop")
+      layout_id = entry["id"]
 
-      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-      # TV derives from the desktop home → renders 10×5. The modal must show 10, not 4.
-      render_hook(view, "set_bp", %{"bp" => "tv"})
+      {:ok, dashboard} =
+        PhoenixKitDashboards.Dashboards.save_layout(
+          dashboard,
+          Enum.map(dashboard.layout, fn inst ->
+            Map.update!(inst, "bp", &Map.delete(&1, layout_id))
+          end)
+        )
+
+      # Without a stored placement the widget packs at its DEFAULT span (4x2) —
+      # layouts are independent, there is no cross-layout derivation anymore.
+      packed = Dashboards.resolve_placement(dashboard, id, layout_id)
+      assert %{"w" => 4, "h" => 2} = packed
+
+      {:ok, view, _html} =
+        live(conn, "/en/admin/dashboards/#{dashboard.uuid}?layout=#{layout_id}")
 
       html =
         view
         |> element("button[phx-click='open_settings'][phx-value-id='#{id}']")
         |> render_click()
 
-      assert html =~ ~s(value="10")
+      # The modal shows the RESOLVED (packed) values, and saving them keeps
+      # the placement exactly where/how it rendered.
+      assert html =~ ~s(name="w") and html =~ ~s(value="#{packed["w"]}")
 
-      # Saving with those (resolved) values keeps 10×5 on TV — not the default 4×2.
       view
-      |> form("form[phx-submit='save_settings']", %{"w" => "10", "h" => "5"})
+      |> form("form[phx-submit='save_settings']", %{"w" => "4", "h" => "2"})
       |> render_submit()
 
+      assert %{"w" => 4, "h" => 2} =
+               Dashboards.resolve_placement(Dashboards.get(dashboard.uuid), id, layout_id)
+
+      # The desktop layout kept its distinctive 10x5 — untouched by the edit.
       assert %{"w" => 10, "h" => 5} =
-               Dashboards.resolve_placement(Dashboards.get(dashboard.uuid), id, "tv")
-    end
-
-    test "a manual size tap before detect still records the real screen size", %{conn: conn} do
-      {conn, user} = sign_in(conn)
-      dashboard = fixture_dashboard(user.uuid)
-      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
-
-      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
-      # User taps Phone before the detect hook reports (bp_manual? locks).
-      render_hook(view, "set_bp", %{"bp" => "phone"})
-      # The late detect for a phone screen must NOT leave the "scaled" banner on —
-      # phone IS the viewer's own size, so it's a native edit.
-      html = render_hook(view, "detect_bp", %{"bp" => "phone"})
-      refute html =~ "scaled to fit"
+               Dashboards.resolve_placement(Dashboards.get(dashboard.uuid), id, "desktop")
     end
   end
 
