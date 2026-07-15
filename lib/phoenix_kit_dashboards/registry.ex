@@ -168,6 +168,13 @@ defmodule PhoenixKitDashboards.Registry do
       )
 
       []
+  catch
+    kind, reason ->
+      Logger.warning(
+        "[Dashboards] #{inspect(module)}.#{@provider_callback}/0 #{kind}: #{inspect(reason)}"
+      )
+
+      []
   end
 
   defp normalize(map, source) do
@@ -182,6 +189,15 @@ defmodule PhoenixKitDashboards.Registry do
 
         []
     end
+  rescue
+    # One malformed provider entry (e.g. a non-stringable key) must be dropped,
+    # never abort the whole catalog build — that would take down every mount.
+    e ->
+      Logger.warning(
+        "[Dashboards] Dropping widget from #{inspect(source)} (normalize raised: #{Exception.message(e)})"
+      )
+
+      []
   end
 
   # ── Visibility ─────────────────────────────────────────────────────

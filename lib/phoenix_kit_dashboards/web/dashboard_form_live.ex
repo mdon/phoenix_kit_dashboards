@@ -108,6 +108,22 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
       }
       |> Map.merge(scope_attrs(params, socket))
 
+    # Re-fetch + re-check on save: the load-time gate isn't enough — another
+    # admin may have re-scoped the dashboard (e.g. to their personal) while
+    # this form sat open; fail closed like a fresh load would.
+    fresh = Dashboards.get(dashboard.uuid)
+
+    if is_nil(fresh) or not can_manage?(fresh, socket) do
+      {:noreply,
+       socket
+       |> put_flash(:error, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard not found."))
+       |> push_navigate(to: Paths.index())}
+    else
+      do_update(socket, fresh, attrs)
+    end
+  end
+
+  defp do_update(socket, dashboard, attrs) do
     case Dashboards.update(dashboard, attrs, actor_opts(socket)) do
       {:ok, _dashboard} ->
         {:noreply,

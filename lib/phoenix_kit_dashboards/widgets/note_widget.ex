@@ -33,7 +33,10 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
   @impl true
   def update(assigns, socket) do
     settings = assigns[:settings] || %{}
-    body = Map.get(settings, "body", "")
+    # Defense in depth: the context filters settings to scalars, but a widget
+    # must never let a legacy/hostile stored value crash every later mount.
+    body = with b when is_binary(b) <- Map.get(settings, "body", ""), do: b
+    body = if is_binary(body), do: body, else: ""
 
     {:ok,
      socket

@@ -681,6 +681,90 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
     end
   end
 
+  describe "event authorization + hostile params" do
+    defmodule GatedProvider do
+      def phoenix_kit_widgets do
+        [
+          %{
+            key: "gated.test",
+            name: "Gated",
+            component: PhoenixKitDashboards.Widgets.NoteWidget,
+            # "dashboards" resolves via ModuleRegistry and enabled?/0 rescues
+            # to false in the test env — a deterministically DENIED gate.
+            module_key: "dashboards"
+          }
+        ]
+      end
+    end
+
+    test "an event after losing access navigates away without mutating", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+
+      # Another admin re-scopes the dashboard to THEIR personal board.
+      other = user_fixture()
+
+      {:ok, _} =
+        Dashboards.update(Dashboards.get(dashboard.uuid), %{
+          scope: "personal",
+          owner_user_uuid: other.uuid
+        })
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               render_click(view, "add_widget", %{"key" => "core.note"})
+
+      assert to =~ "/admin/dashboards"
+      assert Dashboards.get(dashboard.uuid).layout == []
+    end
+
+    test "a crafted add of a widget the scope lacks is refused", %{conn: conn} do
+      Application.put_env(:phoenix_kit_dashboards, :widget_providers, [GatedProvider])
+      PhoenixKitDashboards.Registry.refresh()
+
+      on_exit(fn ->
+        Application.delete_env(:phoenix_kit_dashboards, :widget_providers)
+        PhoenixKitDashboards.Registry.refresh()
+      end)
+
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+
+      html =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send(self(), {:html, render_click(view, "add_widget", %{"key" => "gated.test"})})
+        end)
+
+      assert_received {:html, rendered}
+      assert rendered =~ "not available" or html != ""
+      assert Dashboards.get(dashboard.uuid).layout == []
+    end
+
+    test "open_settings with an unknown id is a no-op, not a render crash", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+
+      html = render_click(view, "open_settings", %{"id" => "not-a-real-id"})
+      refute html =~ "Widget settings"
+    end
+
+    test "removing the widget whose settings modal is open closes the modal", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
+      [%{"id" => id}] = dashboard.layout
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      assert render_click(view, "open_settings", %{"id" => id}) =~ "Widget settings"
+
+      html = render_click(view, "remove_widget", %{"id" => id})
+      refute html =~ "Widget settings"
+    end
+  end
+
   describe "stale-session safety" do
     test "an external edit survives a mutation from an already-mounted session", %{conn: conn} do
       {conn, user} = sign_in(conn)

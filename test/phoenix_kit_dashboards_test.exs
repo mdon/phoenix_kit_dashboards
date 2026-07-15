@@ -94,6 +94,17 @@ defmodule PhoenixKitDashboardsTest do
     defmodule NotAProvider do
     end
 
+    defmodule RaisingProvider do
+      def phoenix_kit_widgets, do: raise("boom")
+    end
+
+    defmodule MalformedProvider do
+      # A widget with a non-stringable key must be dropped, not abort the build.
+      def phoenix_kit_widgets do
+        [%{key: %{}, name: "Bad", component: PhoenixKitDashboards.Widgets.NoteWidget}]
+      end
+    end
+
     setup do
       on_exit(fn ->
         Application.delete_env(:phoenix_kit_dashboards, :widget_providers)
@@ -120,6 +131,20 @@ defmodule PhoenixKitDashboardsTest do
 
       Registry.refresh()
       assert Registry.get("host.custom")
+    end
+
+    test "a raising or malformed provider is isolated — built-ins + valid providers survive" do
+      Application.put_env(:phoenix_kit_dashboards, :widget_providers, [
+        RaisingProvider,
+        MalformedProvider,
+        HostWidgets
+      ])
+
+      ExUnit.CaptureLog.capture_log(fn -> Registry.refresh() end)
+
+      # The bad providers didn't take down the catalog.
+      assert Registry.get("host.custom")
+      assert Registry.get("core.note")
     end
 
     test "without the config the catalog is unchanged" do
@@ -187,6 +212,36 @@ defmodule PhoenixKitDashboardsTest do
     test "rejects a map missing required fields" do
       assert {:error, {:missing_field, :component}} =
                Widget.from_map(%{key: "x.y", name: "Y"}, :prov)
+    end
+
+    test "accepts a string-keyed provider map (the documented plain-map contract)" do
+      assert {:ok, %Widget{key: "x.y", name: "Y"}} =
+               Widget.from_map(
+                 %{"key" => "x.y", "name" => "Y", "component" => DummyComponent},
+                 :prov
+               )
+    end
+
+    test "drops a settings-schema field whose key would break form nesting" do
+      {:ok, widget} =
+        Widget.from_map(
+          %{
+            key: "x.y",
+            name: "Y",
+            component: DummyComponent,
+            settings_schema: [
+              %{key: "good", type: :string},
+              %{key: "bad]name[x", type: :string},
+              %{key: "also-good_1.2", type: :string}
+            ]
+          },
+          :prov
+        )
+
+      keys = Enum.map(widget.settings_schema, & &1.key)
+      assert "good" in keys
+      assert "also-good_1.2" in keys
+      refute "bad]name[x" in keys
     end
 
     test "default_settings derives from schema" do

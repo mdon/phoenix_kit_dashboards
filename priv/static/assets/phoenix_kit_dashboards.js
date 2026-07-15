@@ -131,6 +131,9 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
       this._onMove = function (ev) {
         if (ev.pointerId !== self.pointerId) return;
+        // A mouse released OUTSIDE the window never delivers pointerup — the
+        // next move arrives with no buttons pressed: treat it as a cancel.
+        if (ev.pointerType === "mouse" && ev.buttons === 0) return self.cancelDrag();
         self.applyMove(ev);
         self.edge.update(ev);
       };
@@ -403,6 +406,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
       this._onMove = function (ev) {
         if (ev.pointerId !== self.pointerId) return;
+        // Mouse released outside the window: no pointerup arrives — cancel.
+        if (ev.pointerType === "mouse" && ev.buttons === 0) return self.cancelResize();
         var dxCss = (ev.clientX - self.startX) / self.zoomX;
         var dyCss = (ev.clientY - self.startY) / self.zoomY;
         var wpx = Math.max(self.minPxW, Math.min(self.maxPxW, self.startCssW + dxCss));
@@ -573,6 +578,9 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
     startDrag(e, item) {
       var self = this;
+      // A 0-size grid (hidden pane, pre-layout) would divide into NaN cells —
+      // refuse the drag instead of pushing nonsense placements.
+      if (!this.el.offsetWidth || !this.el.offsetHeight) return;
       this.item = item;
       this.pointerId = e.pointerId;
       this.m = this.metrics();
@@ -660,6 +668,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
       this._onMove = function (ev) {
         if (ev.pointerId !== self.pointerId) return;
+        // Mouse released outside the window: no pointerup arrives — cancel.
+        if (ev.pointerType === "mouse" && ev.buttons === 0) return self.cancel();
         ev.preventDefault();
         self.clone.style.left = ev.clientX - self.grabDX + "px";
         self.clone.style.top = ev.clientY - self.grabDY + "px";
@@ -811,6 +821,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       this.startY = e.clientY;
       this._onMove = function (ev) {
         if (ev.pointerId !== self.pointerId) return;
+        // Mouse released outside the window: no pointerup arrives — cancel.
+        if (ev.pointerType === "mouse" && ev.buttons === 0) return self.cancel();
         self.move(ev);
       };
       this._onUp = function (ev) {
@@ -867,6 +879,11 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       this.canvas = document.getElementById("dashboard-free-grid");
       this.pane = document.getElementById(this.grid ? "dashboard-grid-fit" : "dashboard-free-fit");
 
+      if (this.grid && (!this.grid.offsetWidth || !this.grid.offsetHeight)) {
+        // A 0-size grid (hidden pane, pre-layout) would divide into NaN cells.
+        this.grid = null;
+      }
+
       if (this.grid) {
         var cols = parseInt(this.grid.getAttribute("data-cols"), 10) || 64;
         var rows = parseInt(this.grid.getAttribute("data-max-rows"), 10) || 36;
@@ -880,7 +897,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
           scaleY: this.grid.offsetHeight ? rect0.height / this.grid.offsetHeight : 1
         };
         this.w = Math.min(this.defW, cols);
-        this.h = this.defH;
+        // Clamp height like the server does — the preview must match the drop.
+        this.h = Math.min(this.defH, rows);
         this.blockers = [];
         var sibs = this.grid.querySelectorAll(".sortable-item[data-id]");
         for (var i = 0; i < sibs.length; i++) {

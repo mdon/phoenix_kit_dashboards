@@ -23,6 +23,9 @@ defmodule PhoenixKitDashboards.Dashboards do
   # Free/pixel-canvas widget size bounds (px).
   @free_min_px 60
   @free_max_px 4000
+  # Position bound: far past any real canvas, but crafted 1e9 coords must not
+  # persist (the fit hook would size a canvas the browser can't survive).
+  @free_max_pos 20_000
 
   # px per lattice unit when seeding a new widget's pixel-canvas geometry from
   # its span (the lattice cell is 25px, so the pixel seed mirrors the grid).
@@ -315,7 +318,10 @@ defmodule PhoenixKitDashboards.Dashboards do
         instance =
           dashboard
           |> new_instance(widget, first_layout_id(dashboard))
-          |> Layout.put_pixel(%{"fx" => max(fx, 0), "fy" => max(fy, 0)})
+          |> Layout.put_pixel(%{
+            "fx" => clamp(fx, 0, @free_max_pos),
+            "fy" => clamp(fy, 0, @free_max_pos)
+          })
 
         dashboard
         |> save_layout(dashboard.layout ++ [instance])
@@ -872,7 +878,10 @@ defmodule PhoenixKitDashboards.Dashboards do
           {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
   def place_widget_px(%Dashboard{} = dashboard, instance_id, fx, fy) do
     update_item(dashboard, instance_id, fn inst ->
-      Layout.put_pixel(inst, %{"fx" => max(fx, 0), "fy" => max(fy, 0)})
+      Layout.put_pixel(inst, %{
+        "fx" => clamp(fx, 0, @free_max_pos),
+        "fy" => clamp(fy, 0, @free_max_pos)
+      })
     end)
   end
 
@@ -902,9 +911,33 @@ defmodule PhoenixKitDashboards.Dashboards do
           {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
   def set_layout_view(%Dashboard{} = dashboard, instance_id, bp, view)
       when is_binary(bp) and is_binary(view) do
-    update_item(dashboard, instance_id, fn inst ->
-      Layout.put_placement(inst, bp, %{"view" => view})
-    end)
+    case Enum.find(dashboard.layout, &(&1["id"] == instance_id)) do
+      nil ->
+        {:ok, dashboard}
+
+      inst ->
+        if valid_view?(inst, view) do
+          # Store the override, then grow the placement on THIS layout to the
+          # new view's minimum (text clock → analog needs more rows) — the
+          # same growth configure_widget applies for instance-level switches.
+          inst = Layout.put_placement(inst, bp, %{"view" => view})
+          layout = swap_item(dashboard.layout, instance_id, inst)
+          {min, _max} = size_bounds(inst, bp)
+          layout = swap_item(layout, instance_id, grow_on_tier(dashboard, inst, bp, min, layout))
+          save_layout(dashboard, layout)
+        else
+          {:ok, dashboard}
+        end
+    end
+  end
+
+  # A view may only be one the widget type declares — a crafted key would
+  # otherwise persist and render as a silent fallback forever.
+  defp valid_view?(inst, view) do
+    case Registry.get(inst["widget_key"]) do
+      %Widget{views: views} -> Enum.any?(views, &(&1.key == view))
+      _ -> false
+    end
   end
 
   @doc """
@@ -993,6 +1026,28 @@ defmodule PhoenixKitDashboards.Dashboards do
         _ -> attrs
       end
 
+    # Settings values must stay SCALAR: form params are attacker-controlled,
+    # and a nested map (settings[body][x]=1) would persist and then crash the
+    # widget's render on every later mount — a permanent brick.
+    attrs =
+      case attrs do
+        %{settings: s} -> Map.put(attrs, :settings, scalar_settings(s))
+        _ -> attrs
+      end
+
+    # A view not declared by the widget type is dropped (nil explicitly
+    # clears back to the default view, which stays allowed).
+    attrs =
+      case attrs do
+        %{view: v} when not is_nil(v) ->
+          inst = Enum.find(dashboard.layout, &(&1["id"] == instance_id))
+
+          if inst && valid_view?(inst, v), do: attrs, else: Map.delete(attrs, :view)
+
+        _ ->
+          attrs
+      end
+
     layout =
       Enum.map(dashboard.layout, fn
         %{"id" => ^instance_id} = inst ->
@@ -1013,6 +1068,16 @@ defmodule PhoenixKitDashboards.Dashboards do
     dashboard
     |> save_layout(layout)
     |> log_on_ok("dashboard.widget_configured", opts, %{"instance_id" => instance_id})
+  end
+
+  # Keep only JSON-scalar values (and stringify atom keys) — the settings map
+  # round-trips into widget renders that expect flat scalars.
+  defp scalar_settings(settings) do
+    settings
+    |> Enum.filter(fn {_k, v} ->
+      is_binary(v) or is_number(v) or is_boolean(v) or is_nil(v)
+    end)
+    |> Map.new(fn {k, v} -> {to_string(k), v} end)
   end
 
   defp put_attr(inst, attrs, key, string_key) do

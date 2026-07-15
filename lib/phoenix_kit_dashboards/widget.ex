@@ -129,8 +129,13 @@ defmodule PhoenixKitDashboards.Widget do
   """
   @spec from_map(term(), source :: module()) :: {:ok, t()} | {:error, term()}
   def from_map(%{} = map, source) do
+    # The contract is "plain maps" — accept atom OR string keys throughout.
+    map = Map.new(map, fn {k, v} -> {to_atom_key(k), v} end)
+
     with {:ok, key} <- fetch(map, :key),
+         true <- is_binary(key) or is_atom(key) or {:error, {:invalid_key, key}},
          {:ok, name} <- fetch(map, :name),
+         true <- is_binary(name) or is_atom(name) or {:error, {:invalid_name, name}},
          {:ok, component} <- fetch(map, :component),
          true <- is_atom(component) || {:error, {:invalid_component, component}},
          true <- Code.ensure_loaded?(component) || {:error, {:component_not_loaded, component}},
@@ -252,7 +257,10 @@ defmodule PhoenixKitDashboards.Widget do
         is_map(field),
         key = field[:key] || field["key"],
         key not in [nil, ""],
-        is_binary(key) or is_atom(key) do
+        is_binary(key) or is_atom(key),
+        # `]`/`[` in a form-field name breaks Phoenix param nesting (the value
+        # would come back as a nested map the widget can't read).
+        Regex.match?(~r/^[a-zA-Z0-9_.-]+$/, to_string(key)) do
       %{
         key: to_string(key),
         type: field_type(field[:type] || field["type"]),
@@ -279,6 +287,14 @@ defmodule PhoenixKitDashboards.Widget do
       value -> {:ok, value}
     end
   end
+
+  # Only WELL-KNOWN string keys convert (String.to_existing_atom would still
+  # let a provider grow the atom table with arbitrary map keys via except).
+  @known_keys ~w(key name description icon module_key component default_size min_size max_size
+                 settings_schema views refresh_interval category)
+  defp to_atom_key(k) when is_atom(k), do: k
+  defp to_atom_key(k) when is_binary(k) and k in @known_keys, do: String.to_atom(k)
+  defp to_atom_key(k), do: k
 
   defp normalize_size(%{w: w, h: h}, _default) when is_integer(w) and is_integer(h),
     do: %{w: w, h: h}

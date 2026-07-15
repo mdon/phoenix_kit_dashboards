@@ -13,6 +13,8 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
   """
   use Phoenix.LiveComponent
 
+  alias PhoenixKit.Users.Auth.Scope
+
   @doc """
   The installed modules that expose a `get_config/0` map, as `{label, key}`
   select options (sorted by display name). Evaluated when the widget catalog is
@@ -42,7 +44,7 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
   def update(assigns, socket) do
     settings = assigns[:settings] || %{}
     module_key = Map.get(settings, "module_key", "")
-    stats = load_stats(module_key)
+    stats = load_stats(module_key, assigns[:scope])
     # The user-set row budget: the detailed table shows exactly this many
     # entries (box divides into slots; nothing scrolls, nothing is silently
     # cut — the "+N more" line says what's beyond the budget).
@@ -161,10 +163,12 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
     _ -> module_key
   end
 
-  defp load_stats(""), do: %{}
+  defp load_stats("", _scope), do: %{}
 
-  defp load_stats(module_key) do
-    with true <- Code.ensure_loaded?(PhoenixKit.ModuleRegistry),
+  defp load_stats(module_key, scope) do
+    with true <- module_enabled?(module_key),
+         true <- module_accessible?(module_key, scope),
+         true <- Code.ensure_loaded?(PhoenixKit.ModuleRegistry),
          module when not is_nil(module) <- PhoenixKit.ModuleRegistry.get_by_key(module_key),
          true <- function_exported?(module, :get_config, 0) do
       module.get_config() |> stringify()
@@ -173,6 +177,35 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
     end
   rescue
     _ -> %{}
+  end
+
+  # A disabled module's config is stale operational data — hide it, the same
+  # way the Registry hides the module's own widgets.
+  defp module_enabled?(module_key) do
+    with true <- Code.ensure_loaded?(PhoenixKit.ModuleRegistry),
+         module when not is_nil(module) <- PhoenixKit.ModuleRegistry.get_by_key(module_key) do
+      not function_exported?(module, :enabled?, 0) or module.enabled?()
+    else
+      _ -> true
+    end
+  rescue
+    _ -> false
+  end
+
+  # A module's get_config/0 is operational data — only show it to a scope that
+  # has access to that module (the same gate the Registry applies to the
+  # module's own widgets). nil scope = an internal caller, allowed; an error
+  # evaluating access fails CLOSED.
+  defp module_accessible?(_module_key, nil), do: true
+
+  defp module_accessible?(module_key, scope) do
+    if Code.ensure_loaded?(Scope) do
+      Scope.has_module_access?(scope, module_key)
+    else
+      true
+    end
+  rescue
+    _ -> false
   end
 
   # Scale-aware self-fit type: grows with the slot (cq units) but clamped to

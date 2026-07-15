@@ -134,8 +134,20 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
          |> push_navigate(to: Paths.index())}
 
       dashboard ->
-        socket = assign(socket, :dashboard, dashboard)
-        do_handle_event(event, params, ensure_active_layout(socket))
+        if can_view?(dashboard, socket) do
+          socket = assign(socket, :dashboard, dashboard)
+          do_handle_event(event, params, ensure_active_layout(socket))
+        else
+          # Access can change mid-session (scope flipped to someone else's
+          # personal, role membership revoked) — fail closed like a fresh mount.
+          {:noreply,
+           socket
+           |> put_flash(
+             :error,
+             Gettext.gettext(PhoenixKitWeb.Gettext, "You do not have access to this dashboard.")
+           )
+           |> push_navigate(to: Paths.index())}
+        end
     end
   end
 
@@ -155,7 +167,9 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   end
 
   defp do_handle_event("add_widget", %{"key" => key}, socket) when is_binary(key) do
-    added(socket, Dashboards.add_widget(socket.assigns.dashboard, key, actor_opts(socket)))
+    with_offered_widget(socket, key, fn socket ->
+      added(socket, Dashboards.add_widget(socket.assigns.dashboard, key, actor_opts(socket)))
+    end)
   end
 
   # A catalog entry dragged out and dropped on a grid cell (DashboardCatalogDrag).
@@ -163,35 +177,46 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # occupied spot (the hook only offers free cells).
   defp do_handle_event("add_widget_at", %{"key" => key, "x" => x, "y" => y}, socket)
        when is_binary(key) do
-    added(
-      socket,
-      Dashboards.add_widget_at(
-        socket.assigns.dashboard,
-        key,
-        socket.assigns.active_layout,
-        to_i(x),
-        to_i(y),
-        actor_opts(socket)
+    with_offered_widget(socket, key, fn socket ->
+      added(
+        socket,
+        Dashboards.add_widget_at(
+          socket.assigns.dashboard,
+          key,
+          socket.assigns.active_layout,
+          to_i(x),
+          to_i(y),
+          actor_opts(socket)
+        )
       )
-    )
+    end)
   end
 
   # A catalog entry dropped on the pixel canvas at exact px.
   defp do_handle_event("add_widget_px", %{"key" => key, "fx" => fx, "fy" => fy}, socket)
        when is_binary(key) do
-    added(
-      socket,
-      Dashboards.add_widget_px(
-        socket.assigns.dashboard,
-        key,
-        to_i(fx),
-        to_i(fy),
-        actor_opts(socket)
+    with_offered_widget(socket, key, fn socket ->
+      added(
+        socket,
+        Dashboards.add_widget_px(
+          socket.assigns.dashboard,
+          key,
+          to_i(fx),
+          to_i(fy),
+          actor_opts(socket)
+        )
       )
-    )
+    end)
   end
 
   defp do_handle_event("remove_widget", %{"id" => instance_id}, socket) do
+    # Removing the widget whose settings modal is open must close the modal —
+    # the next render would otherwise crash resolving the gone instance.
+    socket =
+      if socket.assigns.settings_instance == instance_id,
+        do: assign(socket, :settings_instance, nil),
+        else: socket
+
     apply_layout(
       socket,
       Dashboards.remove_widget(socket.assigns.dashboard, instance_id, actor_opts(socket))
@@ -375,31 +400,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   defp do_handle_event("grid_dim", %{"dim" => dim, "delta" => delta}, socket) do
     with {:ok, dim} <- Map.fetch(%{"cols" => :cols, "rows" => :rows}, dim),
          d when d in [-1, 1] <- to_i(delta) do
-      case Dashboards.resize_grid(socket.assigns.dashboard, socket.assigns.active_layout, dim, d) do
-        {:ok, dashboard} ->
-          {:noreply, assign(socket, :dashboard, dashboard)}
-
-        {:error, :occupied} ->
-          msg =
-            case dim do
-              :cols ->
-                Gettext.gettext(
-                  PhoenixKitWeb.Gettext,
-                  "Cannot remove the column — a widget still occupies it."
-                )
-
-              :rows ->
-                Gettext.gettext(
-                  PhoenixKitWeb.Gettext,
-                  "Cannot remove the row — a widget still occupies it."
-                )
-            end
-
-          {:noreply, put_flash(socket, :error, msg)}
-
-        {:error, _} ->
-          {:noreply, socket}
-      end
+      # set_grid_dims NEVER refuses — it clamps to the occupied extent — so
+      # the only outcomes are the updated dashboard or a transient DB error.
+      apply_layout(
+        socket,
+        Dashboards.resize_grid(socket.assigns.dashboard, socket.assigns.active_layout, dim, d)
+      )
     else
       # Crafted/malformed payloads are ignored.
       _ -> {:noreply, socket}
@@ -457,7 +463,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   end
 
   defp do_handle_event("open_settings", %{"id" => instance_id}, socket) do
-    {:noreply, assign(socket, :settings_instance, instance_id)}
+    # Only for a widget that exists — a crafted/stale id must not park a
+    # dangling id in the assign (the modal render would crash on nil).
+    if settings_instance_data(socket.assigns.dashboard, instance_id) do
+      {:noreply, assign(socket, :settings_instance, instance_id)}
+    else
+      {:noreply, socket}
+    end
   end
 
   defp do_handle_event("close_settings", _params, socket) do
@@ -475,6 +487,30 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   defp do_handle_event(event, _params, socket) do
     Logger.debug("[Dashboards] Unhandled event: #{inspect(event)}")
     {:noreply, socket}
+  end
+
+  # Placing a widget requires the SAME gate that decides what the catalog
+  # offers — a crafted event must not persist a widget whose module the
+  # viewer's scope lacks (the placement would outlive a later permission
+  # grant and already pollutes the audit log). Unknown keys fall through to
+  # the context's {:error, :unknown_widget} flash.
+  defp with_offered_widget(socket, key, fun) do
+    case Registry.get(key) do
+      %Widget{} = widget ->
+        if Registry.visible_for_scope?(widget, socket.assigns[:phoenix_kit_current_scope]) do
+          fun.(socket)
+        else
+          {:noreply,
+           put_flash(
+             socket,
+             :error,
+             Gettext.gettext(PhoenixKitWeb.Gettext, "This widget is not available to you.")
+           )}
+        end
+
+      nil ->
+        fun.(socket)
+    end
   end
 
   # No open settings modal (e.g. a double submit racing close_settings) is a
@@ -631,8 +667,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # the active tier's resolved placement (matching the first render), or the default
   # tier when unavailable.
   defp widget_update_assigns(inst, scope, placement) do
-    # Fallback: Layout.placement/2 returns the span defaults for any id.
-    p = placement || Layout.placement(inst, "default")
+    # Grid mode passes the resolved placement; PIXEL mode derives cells from
+    # the real px box (fw/fh ÷ the 25px cell) — falling back to the grid
+    # defaults would hand a 100×100px note the size of a 400×200 box and its
+    # content-aware type would overflow.
+    p = placement || pixel_cells(inst)
 
     [
       id: inst["id"],
@@ -643,6 +682,15 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       size: %{w: p["w"], h: p["h"]},
       scope: scope
     ]
+  end
+
+  defp pixel_cells(inst) do
+    px = Layout.pixel(inst)
+
+    %{
+      "w" => max(round((px["fw"] || 0) / Lattice.cell()), 1),
+      "h" => max(round((px["fh"] || 0) / Lattice.cell()), 1)
+    }
   end
 
   # Only carry a `:view` into the config update when the form actually submitted
@@ -805,7 +853,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       </div>
 
       <.settings_modal
-        :if={@settings_instance}
+        :if={@settings_instance && settings_instance_data(@dashboard, @settings_instance)}
         instance={settings_instance_data(@dashboard, @settings_instance)}
         mode={Dashboard.layout_mode(@dashboard)}
         active_layout={@active_layout}
@@ -1500,8 +1548,9 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   attr(:placement, :map, default: nil)
 
   defp widget_body(assigns) do
-    # Fallback (pixel mode): Layout.placement/2 returns span defaults for any id.
-    placement = assigns.placement || Layout.placement(assigns.inst, "default")
+    # PIXEL mode has no grid placement — derive cells from the real px box so
+    # size-aware widgets (the note's content-aware type) see their true box.
+    placement = assigns.placement || pixel_cells(assigns.inst)
     widget = Registry.get(assigns.inst["widget_key"])
 
     assigns =

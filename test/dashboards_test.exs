@@ -158,6 +158,28 @@ defmodule PhoenixKitDashboards.DashboardsTest do
     end
   end
 
+  describe "pixel-canvas bounds" do
+    test "crafted huge coordinates clamp to the position bound" do
+      {:ok, dashboard} =
+        Dashboards.create(%{title: "Px", scope: "system", config: %{"type" => "pixel"}})
+
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
+      [%{"id" => id}] = dashboard.layout
+
+      {:ok, dashboard} = Dashboards.place_widget_px(dashboard, id, 1_000_000_000, -50)
+      [inst] = dashboard.layout
+      px = Layout.pixel(inst)
+      assert px["fx"] == 20_000
+      assert px["fy"] == 0
+
+      {:ok, dashboard} =
+        Dashboards.add_widget_px(dashboard, "core.clock", 999_999_999, 999_999_999)
+
+      clock = Enum.find(dashboard.layout, &(&1["widget_key"] == "core.clock"))
+      assert Layout.pixel(clock)["fx"] == 20_000
+    end
+  end
+
   describe "widget operations" do
     setup do
       {:ok, dashboard} = Dashboards.create(%{title: "Grid", scope: "system"})
@@ -595,6 +617,33 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert_activity_logged("dashboard.widget_configured", resource_uuid: dashboard.uuid)
     end
 
+    test "configure_widget drops non-scalar settings values (anti-brick)" do
+      {:ok, d0} = Dashboards.create(%{title: "V", scope: "system"})
+      {:ok, dashboard} = Dashboards.add_widget(d0, "core.note")
+      [%{"id" => id}] = dashboard.layout
+
+      # A nested map/list in a settings value would crash the widget's render
+      # on every later mount — only JSON scalars are kept.
+      {:ok, updated} =
+        Dashboards.configure_widget(dashboard, id, %{
+          settings: %{"body" => %{"x" => 1}, "title" => "ok", "n" => 3, "flag" => true}
+        })
+
+      [%{"settings" => settings}] = updated.layout
+      refute Map.has_key?(settings, "body")
+      assert settings == %{"title" => "ok", "n" => 3, "flag" => true}
+    end
+
+    test "configure_widget drops a view the widget type does not declare" do
+      {:ok, d0} = Dashboards.create(%{title: "V", scope: "system"})
+      {:ok, dashboard} = Dashboards.add_widget(d0, "core.clock")
+      [%{"id" => id}] = dashboard.layout
+
+      {:ok, updated} = Dashboards.configure_widget(dashboard, id, %{view: "not-a-clock-view"})
+      # Unchanged from the seeded default ("normal"), never the crafted key.
+      assert [%{"view" => "normal"}] = updated.layout
+    end
+
     test "configure_widget leaves unspecified attrs untouched" do
       {:ok, d0} = Dashboards.create(%{title: "V", scope: "system"})
       {:ok, dashboard} = Dashboards.add_widget(d0, "core.module_stats")
@@ -747,6 +796,31 @@ defmodule PhoenixKitDashboards.DashboardsTest do
     test "layout_mode derives from type" do
       assert Dashboard.layout_mode(%Dashboard{config: %{"type" => "pixel"}}) == "free"
       assert Dashboard.layout_mode(%Dashboard{config: %{"type" => "grid"}}) == "grid"
+    end
+  end
+
+  describe "set_layout_view/4 (per-layout view)" do
+    test "grows the placement on that layout to the new view's minimum" do
+      {:ok, d0} = Dashboards.create(%{title: "L", scope: "system"})
+      {:ok, dashboard} = Dashboards.add_widget(d0, "core.clock")
+      [%{"id" => id}] = dashboard.layout
+      # Shrink to the normal-view minimum first.
+      {:ok, dashboard} = Dashboards.resize_widget(dashboard, id, "l1", 8, 4)
+      assert %{"w" => 8, "h" => 4} = Dashboards.resolve_placement(dashboard, id, "l1")
+
+      # Analog needs 8x8 — switching the view grows the placement to meet it.
+      {:ok, dashboard} = Dashboards.set_layout_view(dashboard, id, "l1", "analog")
+      assert %{"w" => w, "h" => h} = Dashboards.resolve_placement(dashboard, id, "l1")
+      assert w >= 8 and h >= 8
+    end
+
+    test "ignores a view the widget type does not declare" do
+      {:ok, d0} = Dashboards.create(%{title: "L", scope: "system"})
+      {:ok, dashboard} = Dashboards.add_widget(d0, "core.clock")
+      [%{"id" => id}] = dashboard.layout
+
+      {:ok, updated} = Dashboards.set_layout_view(dashboard, id, "l1", "bogus")
+      assert PhoenixKitDashboards.Layout.view(hd(updated.layout), "l1") == "normal"
     end
   end
 
