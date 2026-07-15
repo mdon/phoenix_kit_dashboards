@@ -113,8 +113,12 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
             :for={{key, value} <- @shown}
             class="flex min-h-0 flex-1 items-center justify-between gap-2 [container-type:size]"
           >
-            <span class="truncate text-[55cqh] leading-none text-base-content/60">{key}</span>
-            <span class="shrink-0 font-mono text-[55cqh] leading-none">{inspect(value)}</span>
+            <span class="truncate leading-none text-base-content/60" style={fit_text(11, "55cqh", 16)}>
+              {key}
+            </span>
+            <span class="shrink-0 font-mono leading-none" style={fit_text(11, "55cqh", 16)}>
+              {inspect(value)}
+            </span>
           </div>
           <div :for={_pad <- 1..@filler//1} class="min-h-0 flex-1"></div>
           <div
@@ -169,6 +173,14 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
     end
   rescue
     _ -> %{}
+  end
+
+  # Scale-aware self-fit type: grows with the slot (cq units) but clamped to
+  # a consistent px range so widgets stay cohesive at any box size; the
+  # --pk-scale var (set by the fit hook) keeps the clamp proportional in
+  # scaled previews.
+  defp fit_text(min_px, cq, max_px) do
+    "font-size: clamp(calc(#{min_px}px * var(--pk-scale, 1)), #{cq}, calc(#{max_px}px * var(--pk-scale, 1)))"
   end
 
   defp stringify(map) when is_map(map) do

@@ -1222,6 +1222,9 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       canvas.style.transform = "";
       canvas.style.width = designW * sx + "px";
       canvas.style.height = designH * sy + "px";
+      // Widgets clamp their cq type into a consistent px range; the scale var
+      // keeps those clamps proportional when the board renders scaled down.
+      canvas.style.setProperty("--pk-scale", String(Math.min(sx, sy)));
 
       // The spacer carries the fitted dims; the flex-centered pane positions it.
       spacer.style.width = designW * sx + "px";
