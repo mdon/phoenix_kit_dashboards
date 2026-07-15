@@ -539,8 +539,39 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       })
       |> render_submit()
 
-      assert [%{"view" => "compact", "settings" => %{"module_key" => "jobs"}}] =
-               Dashboards.get(dashboard.uuid).layout
+      # On the grid the view is a PER-LAYOUT setting: it lands on the active
+      # layout's placement (designing the phone layout = choosing how widgets
+      # look on the phone), never on the instance default.
+      [inst] = Dashboards.get(dashboard.uuid).layout
+      assert %{"settings" => %{"module_key" => "jobs"}} = inst
+      assert Layout.view(inst, "l1") == "compact"
+      # The instance default (seeded at add time) is untouched.
+      assert inst["view"] == "detailed"
+    end
+
+    test "cycle_view changes only the ACTIVE layout's view", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.clock")
+      {:ok, dashboard, entry} = Dashboards.add_layout(dashboard, "l1")
+      other = entry["id"]
+      [%{"id" => id}] = dashboard.layout
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+
+      # Cycling on l1 (clock views: normal -> digital) overrides l1 only...
+      render_click(view, "cycle_view", %{"id" => id})
+      [inst] = Dashboards.get(dashboard.uuid).layout
+      assert Layout.view(inst, "l1") == "digital"
+      # ...the other layout still resolves to the instance default ("normal",
+      # seeded at add time).
+      assert Layout.view(inst, other) == "normal"
+
+      # Cycling again continues from the LAYOUT's view (digital -> analog).
+      render_click(view, "cycle_view", %{"id" => id})
+      [inst] = Dashboards.get(dashboard.uuid).layout
+      assert Layout.view(inst, "l1") == "analog"
+      assert Layout.view(inst, other) == "normal"
     end
 
     test "save_settings without an open modal is a no-op (no write, no phantom activity)", %{

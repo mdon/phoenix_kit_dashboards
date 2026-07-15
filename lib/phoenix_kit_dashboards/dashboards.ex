@@ -496,7 +496,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   defp resize_instance(inst, bp, w, h, others, cols, rows) do
-    bounds = size_bounds(inst)
+    bounds = size_bounds(inst, bp)
     placement = Layout.placement(inst, bp)
 
     case {placement["x"], placement["y"]} do
@@ -892,6 +892,22 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   @doc """
+  Set a widget's view FOR ONE LAYOUT (stored on that layout's placement):
+  designing the phone layout means choosing how each widget looks on the
+  phone, without touching the other screens. Falls back to the instance
+  default (`configure_widget/4`'s `:view`) where no override is stored —
+  see `Layout.view/2`. A presentation tweak — not activity-logged.
+  """
+  @spec set_layout_view(Dashboard.t(), instance_id :: String.t(), String.t(), String.t()) ::
+          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+  def set_layout_view(%Dashboard{} = dashboard, instance_id, bp, view)
+      when is_binary(bp) and is_binary(view) do
+    update_item(dashboard, instance_id, fn inst ->
+      Layout.put_placement(inst, bp, %{"view" => view})
+    end)
+  end
+
+  @doc """
   Set the dashboard's layout mode (`"grid"` or `"free"`). Invalid values are
   ignored. A presentation tweak — not activity-logged.
   """
@@ -1018,13 +1034,11 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   defp grow_all_tiers(dashboard, item, layout) do
-    {min, _max} = size_bounds(item)
-
-    Enum.reduce(
-      Map.keys(item["bp"] || %{}),
-      item,
-      &grow_on_tier(dashboard, &2, &1, min, layout)
-    )
+    # Per-layout: each layout may show a different view with its own minimum.
+    Enum.reduce(Map.keys(item["bp"] || %{}), item, fn bp, item ->
+      {min, _max} = size_bounds(item, bp)
+      grow_on_tier(dashboard, item, bp, min, layout)
+    end)
   end
 
   defp swap_item(layout, instance_id, replacement) do
@@ -1195,15 +1209,15 @@ defmodule PhoenixKitDashboards.Dashboards do
   # them), and a user cramming a dense dashboard may opt out. Falls back to
   # sane defaults when the type is unknown (a stale instance whose provider was
   # uninstalled).
-  defp size_bounds(item) do
+  defp size_bounds(item, bp) do
     case Registry.get(item["widget_key"]) do
-      %Widget{} = widget -> {instance_min(item, widget), widget.max_size}
+      %Widget{} = widget -> {instance_min(item, bp, widget), widget.max_size}
       _ -> {%{w: 1, h: 1}, %{w: Lattice.max_dim(), h: Lattice.max_dim()}}
     end
   end
 
-  defp instance_min(%{"min_override" => true}, _widget), do: %{w: 1, h: 1}
-  defp instance_min(item, widget), do: Widget.min_size_for(widget, item["view"])
+  defp instance_min(%{"min_override" => true}, _bp, _widget), do: %{w: 1, h: 1}
+  defp instance_min(item, bp, widget), do: Widget.min_size_for(widget, Layout.view(item, bp))
 
   defp clamp(value, lo, hi) when is_integer(value), do: value |> max(lo) |> min(hi)
   defp clamp(_value, lo, _hi), do: lo

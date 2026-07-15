@@ -167,7 +167,11 @@ without stored `x`/`y` are packed at render and pinned on their first edit).
   self-fits** via container queries (`[container-type:size]` +
   `cqmin`/`cqh` type) — the view (detailed/dense/…) is user-chosen (hover
   toolbar cycle button, `cycle_view`) and honored verbatim at ANY size —
-  never silently switched; list widgets take an "items: N" slot budget
+  never silently switched. On the grid the view is PER LAYOUT (stored on
+  that layout's placement as `"view"`, `Layout.view/2` resolves override →
+  instance default; `set_layout_view/4` writes it) — designing the phone
+  layout means choosing how widgets look ON the phone. The pixel canvas
+  has no layouts, so there the view stays instance-level; list widgets take an "items: N" slot budget
   (body divides into N fixed slots + a "+N more" line; see
   `ModuleStatsWidget` for the worked pattern). Widgets never overlap; a
   widget without a stored placement in a layout packs first-fit at render

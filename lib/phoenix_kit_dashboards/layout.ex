@@ -49,6 +49,16 @@ defmodule PhoenixKitDashboards.Layout do
     Map.put(item, "bp", Map.put(bpmap, bp, Map.merge(placement(item, bp), stringify(attrs))))
   end
 
+  @doc """
+  The widget's view on a layout: the layout's own override (stored in its
+  placement — you design the phone layout by choosing how widgets look ON
+  the phone), else the instance default.
+  """
+  @spec view(map(), String.t()) :: String.t() | nil
+  def view(item, bp) when is_map(item) and is_binary(bp) do
+    get_in(item, ["bp", bp, "view"]) || item["view"]
+  end
+
   @doc "Whether the widget is hidden on a layout."
   @spec hidden?(map(), String.t()) :: boolean()
   def hidden?(item, bp), do: placement(item, bp)["hidden"] == true

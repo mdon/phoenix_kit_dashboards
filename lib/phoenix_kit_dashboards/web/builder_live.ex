@@ -321,20 +321,31 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   # Cycle a widget instance through its declared views (the hover-toolbar
   # button) — view modes are user-chosen; size never switches them silently.
+  # On the GRID the view is PER LAYOUT (designing the phone layout means
+  # choosing how widgets look on the phone); the pixel canvas has no layouts,
+  # so there it cycles the instance default.
   @impl true
   def handle_event("cycle_view", %{"id" => instance_id}, socket) when is_binary(instance_id) do
     dashboard = socket.assigns.dashboard
+    grid? = Dashboard.layout_mode(dashboard) == "grid"
 
     with %{} = inst <- Enum.find(dashboard.layout, &(&1["id"] == instance_id)),
          %Widget{views: [_ | _] = views} <- Registry.get(inst["widget_key"]) do
       keys = Enum.map(views, & &1.key)
-      current = inst["view"] || hd(keys)
+
+      current =
+        (grid? && Layout.view(inst, socket.assigns.active_layout)) || inst["view"] || hd(keys)
+
       next = Enum.at(keys, rem((Enum.find_index(keys, &(&1 == current)) || 0) + 1, length(keys)))
 
-      apply_layout(
-        socket,
-        Dashboards.configure_widget(dashboard, instance_id, %{view: next}, actor_opts(socket))
-      )
+      result =
+        if grid? do
+          Dashboards.set_layout_view(dashboard, instance_id, socket.assigns.active_layout, next)
+        else
+          Dashboards.configure_widget(dashboard, instance_id, %{view: next}, actor_opts(socket))
+        end
+
+      apply_layout(socket, result)
     else
       _ -> {:noreply, socket}
     end
@@ -458,10 +469,29 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # no-op — otherwise configure_widget would write the unchanged layout and log
   # a phantom "widget_configured" activity for a nil instance.
   defp save_settings(socket, instance_id, params) do
+    grid? = Dashboard.layout_mode(socket.assigns.dashboard) == "grid"
+
     attrs =
       %{settings: params["settings"] || %{}}
-      |> maybe_put_view(params["view"])
+      |> then(&if grid?, do: &1, else: maybe_put_view(&1, params["view"]))
       |> maybe_put_min_override(params["min_override"])
+
+    # On the grid the view is a PER-LAYOUT setting (stored on the active
+    # layout's placement); everything else stays instance-level.
+    socket =
+      if grid? && params["view"] not in [nil, ""] do
+        case Dashboards.set_layout_view(
+               socket.assigns.dashboard,
+               instance_id,
+               socket.assigns.active_layout,
+               params["view"]
+             ) do
+          {:ok, dashboard} -> assign(socket, :dashboard, dashboard)
+          _ -> socket
+        end
+      else
+        socket
+      end
 
     socket = assign(socket, :settings_instance, nil)
 
@@ -595,7 +625,9 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     [
       id: inst["id"],
       settings: inst["settings"] || %{},
-      view: inst["view"],
+      # The RESOLVED placement carries the layout's view override (pixel mode
+      # has no placement → the instance default).
+      view: (placement || %{})["view"] || inst["view"],
       size: %{w: p["w"], h: p["h"]},
       scope: scope
     ]
@@ -1185,7 +1217,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       |> assign(:limits, card_limits(assigns))
       |> assign(:hidden?, assigns.mode == "grid" and (assigns.placement || %{})["hidden"] == true)
       |> assign(:views, (widget && widget.views) || [])
-      |> assign(:view_name, current_view_name(widget, assigns.inst))
+      |> assign(:view_name, current_view_name(widget, assigns.inst, assigns.placement))
 
     ~H"""
     <div
@@ -1306,10 +1338,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     """
   end
 
-  defp current_view_name(nil, _inst), do: ""
+  defp current_view_name(nil, _inst, _placement), do: ""
 
-  defp current_view_name(widget, inst) do
-    key = inst["view"] || Widget.default_view(widget)
+  defp current_view_name(widget, inst, placement) do
+    key = (placement || %{})["view"] || inst["view"] || Widget.default_view(widget)
 
     case Enum.find(widget.views, &(&1.key == key)) do
       %{name: name} -> translate_catalog(name)
@@ -1320,8 +1352,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # Resize bounds fed to the DashboardResize hook (as data-*). Grid: the resolved
   # placement span + the widget type's min/max clamped to the active layout's
   # columns. Pixel: the default-bp span (unused by the pixel resize, which uses px).
-  defp card_limits(%{mode: "grid", inst: inst, placement: placement, cols: cols}) do
-    {min, max} = widget_size_bounds(inst)
+  defp card_limits(%{mode: "grid", inst: inst, placement: placement, cols: cols} = assigns) do
+    {min, max} = widget_size_bounds(inst, assigns.active_layout)
     cols = cols || 12
     p = placement || %{}
 
@@ -1350,24 +1382,24 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     p = Layout.placement(inst, bp)
     w = p["w"] |> to_int(4) |> clamp(1, cols)
     h = p["h"] |> to_int(2) |> max(1)
-    {min, max} = widget_size_bounds(inst)
+    {min, max} = widget_size_bounds(inst, bp)
 
     %{w: w, h: h, min_w: min(min.w, cols), max_w: min(max.w, cols), min_h: min.h, max_h: max.h}
   end
 
-  # Min/max span for an instance — the min follows its selected view when that
-  # view declares one (mirrors the context's clamp); falls back to a permissive
-  # range for an instance whose provider is no longer installed.
-  defp widget_size_bounds(inst) do
+  # Min/max span for an instance — the min follows the LAYOUT's resolved view
+  # when that view declares one (mirrors the context's clamp); falls back to a
+  # permissive range for an instance whose provider is no longer installed.
+  defp widget_size_bounds(inst, bp) do
     case Registry.get(inst["widget_key"]) do
-      %Widget{} = widget -> {instance_min(inst, widget), widget.max_size}
+      %Widget{} = widget -> {instance_min(inst, bp, widget), widget.max_size}
       _ -> {%{w: 1, h: 1}, %{w: Lattice.max_dim(), h: Lattice.max_dim()}}
     end
   end
 
   # Mirrors the context: the per-instance override drops the recommended floor.
-  defp instance_min(%{"min_override" => true}, _widget), do: %{w: 1, h: 1}
-  defp instance_min(inst, widget), do: Widget.min_size_for(widget, inst["view"])
+  defp instance_min(%{"min_override" => true}, _bp, _widget), do: %{w: 1, h: 1}
+  defp instance_min(inst, bp, widget), do: Widget.min_size_for(widget, Layout.view(inst, bp))
 
   # Grid mode: explicit cell placement — `x`/`y` (0-based, from the resolved
   # placement, which always carries them) anchor the card, spanning `w`×`h`.
@@ -1488,7 +1520,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       module={@widget.component}
       id={@inst["id"]}
       settings={@inst["settings"] || %{}}
-      view={@inst["view"]}
+      view={(@placement || %{})["view"] || @inst["view"]}
       size={%{w: @placement["w"], h: @placement["h"]}}
       scope={@scope}
     />
@@ -1634,7 +1666,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
             :if={@widget && @widget.views != []}
             name="view"
             label={Gettext.gettext(PhoenixKitWeb.Gettext, "View")}
-            value={@instance["view"]}
+            value={(@grid_placement || %{})["view"] || @instance["view"]}
             options={Enum.map(@widget.views, fn v -> {translate_catalog(v.name), v.key} end)}
           />
           <div :if={@widget}>
