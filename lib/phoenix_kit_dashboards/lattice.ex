@@ -21,9 +21,11 @@ defmodule PhoenixKitDashboards.Lattice do
 
   # Stretch tolerance: the canvas fills the pane with independent per-axis
   # scales when both stay within this ratio of 1 and of each other (cells go
-  # imperceptibly non-square, no orphan strip). Beyond it: shrink-to-fit or
-  # float-at-natural-size — cells are a real 25px, never blown up.
-  @stretch_tolerance 1.10
+  # imperceptibly non-square, no orphan strip). Tight on purpose — it only
+  # absorbs Fit-screen rounding (±half a cell), and anything past ~4%
+  # visibly distorts the board's shape (a Square layout must LOOK square).
+  # Beyond it: shrink-to-fit or float-at-natural-size — never blown up.
+  @stretch_tolerance 1.04
 
   @doc "The nominal square cell size in design px."
   @spec cell() :: pos_integer()

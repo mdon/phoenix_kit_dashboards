@@ -148,10 +148,10 @@ without stored `x`/`y` are packed at render and pinned on their first edit).
   per-widget placements (widgets are dashboard-level and live on elsewhere).
   Each layout is `cols × rows` on a **gapless 25px nominal SQUARE cell
   lattice** (`PhoenixKitDashboards.Lattice`: cell 25, dims 4..160, stretch
-  tolerance 1.10) representing **exactly ONE SCREENFUL — nothing scrolls,
+  tolerance 1.04) representing **exactly ONE SCREENFUL — nothing scrolls,
   ever**. `DashboardGridFit` sizes the canvas
   NATIVELY (no transform — text/SVG render crisp and undistorted): per-axis
-  fill when both scales stay within ~10% of 1 and of each other (a fitted
+  fill when both scales stay within ~4% of 1 and of each other (a fitted
   screen fills exactly; only the cell rectangles go non-square), else the
   intact **artboard** (`bg-base-100 shadow-xl ring-1`, mono caption
   `Layout 1 · 64×36` hidden when no room below) shrinks into a smaller

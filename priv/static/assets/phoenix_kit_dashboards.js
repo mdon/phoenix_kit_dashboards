@@ -1202,10 +1202,13 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
       var sx = availW / designW;
       var sy = availH / designH;
-      var TOLERANCE = 1.10;
+      // Tight on purpose: the stretch exists to absorb Fit-screen rounding
+      // (±half a cell ≈ 1-2%), and anything past ~4% visibly distorts the
+      // board's shape — a Square layout must LOOK square.
+      var TOLERANCE = 1.04;
 
       // STANDARD CELLS: the lattice cell is a real 25px, and the stretch only
-      // absorbs the last <=10% so a fitted screen fills exactly edge-to-edge.
+      // absorbs the last few % so a fitted screen fills exactly edge-to-edge.
       // Anything else renders as an intact artboard: shrunk to fit when the
       // pane is smaller, FLOATING CENTERED at natural size when it's bigger —
       // never blown up (a bigger display wants its own fitted layout).
