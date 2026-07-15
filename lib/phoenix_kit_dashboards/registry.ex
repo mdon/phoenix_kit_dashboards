@@ -156,8 +156,7 @@ defmodule PhoenixKitDashboards.Registry do
     :phoenix_kit_dashboards
     |> Application.get_env(:widget_providers, [])
     |> List.wrap()
-    |> Enum.filter(&is_atom/1)
-    |> Enum.filter(&Code.ensure_loaded?/1)
+    |> Enum.filter(&(is_atom(&1) and Code.ensure_loaded?(&1)))
   end
 
   defp safe_widgets(module) do

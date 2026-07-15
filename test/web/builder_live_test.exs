@@ -681,6 +681,45 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
     end
   end
 
+  describe "stale-session safety" do
+    test "an external edit survives a mutation from an already-mounted session", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.clock")
+      [%{"id" => clock}] = dashboard.layout
+
+      # Session mounts with ONE widget in its assigns...
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+
+      # ...then ANOTHER session (here: the context directly) adds a widget.
+      {:ok, _} = Dashboards.add_widget(Dashboards.get(dashboard.uuid), "core.note")
+
+      # A mutation from the stale session must NOT clobber the external add —
+      # every event re-fetches the dashboard before operating.
+      render_click(view, "cycle_view", %{"id" => clock})
+
+      fresh = Dashboards.get(dashboard.uuid)
+      assert length(fresh.layout) == 2
+      assert Layout.view(Enum.find(fresh.layout, &(&1["id"] == clock)), "l1") == "digital"
+    end
+
+    test "a dashboard deleted underneath the session exits cleanly", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
+      [%{"id" => id}] = dashboard.layout
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      {:ok, _} = Dashboards.delete(Dashboards.get(dashboard.uuid))
+
+      # The next event navigates away instead of crashing on a nil dashboard.
+      assert {:error, {:live_redirect, %{to: to}}} =
+               render_click(view, "remove_widget", %{"id" => id})
+
+      assert to =~ "/admin/dashboards"
+    end
+  end
+
   describe "role-scoped access (A1)" do
     test "a user with the role can open a role dashboard in the builder", %{conn: conn} do
       user = user_fixture()

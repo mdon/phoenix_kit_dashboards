@@ -118,17 +118,51 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end
   end
 
+  # EVERY event operates on a FRESH dashboard: builder sessions are
+  # long-lived and every context write persists the whole JSONB layout
+  # column, so acting on the mounted-at copy would clobber anything another
+  # session (a second tab, an external script) changed since — wholesale.
+  # Re-fetching narrows the stale window from session-lifetime to the
+  # single event. A dashboard deleted underneath the session exits cleanly.
   @impl true
-  def handle_event("add_widget", %{"key" => key}, socket) when is_binary(key) do
+  def handle_event(event, params, socket) do
+    case Dashboards.get(socket.assigns.dashboard.uuid) do
+      nil ->
+        {:noreply,
+         socket
+         |> put_flash(:error, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard not found."))
+         |> push_navigate(to: Paths.index())}
+
+      dashboard ->
+        socket = assign(socket, :dashboard, dashboard)
+        do_handle_event(event, params, ensure_active_layout(socket))
+    end
+  end
+
+  # The active layout may have been deleted by another session — fall back to
+  # the first one rather than editing a ghost id.
+  defp ensure_active_layout(socket) do
+    active = socket.assigns.active_layout
+    ids = socket.assigns.dashboard |> Dashboards.layouts() |> Enum.map(& &1["id"])
+
+    if is_nil(active) or active in ids do
+      socket
+    else
+      socket
+      |> assign(:active_layout, Dashboards.first_layout_id(socket.assigns.dashboard))
+      |> assign(:renaming_layout, nil)
+    end
+  end
+
+  defp do_handle_event("add_widget", %{"key" => key}, socket) when is_binary(key) do
     added(socket, Dashboards.add_widget(socket.assigns.dashboard, key, actor_opts(socket)))
   end
 
   # A catalog entry dragged out and dropped on a grid cell (DashboardCatalogDrag).
   # x/y are 0-based cells for the active bp; the context clamps + refuses an
   # occupied spot (the hook only offers free cells).
-  @impl true
-  def handle_event("add_widget_at", %{"key" => key, "x" => x, "y" => y}, socket)
-      when is_binary(key) do
+  defp do_handle_event("add_widget_at", %{"key" => key, "x" => x, "y" => y}, socket)
+       when is_binary(key) do
     added(
       socket,
       Dashboards.add_widget_at(
@@ -143,9 +177,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   end
 
   # A catalog entry dropped on the pixel canvas at exact px.
-  @impl true
-  def handle_event("add_widget_px", %{"key" => key, "fx" => fx, "fy" => fy}, socket)
-      when is_binary(key) do
+  defp do_handle_event("add_widget_px", %{"key" => key, "fx" => fx, "fy" => fy}, socket)
+       when is_binary(key) do
     added(
       socket,
       Dashboards.add_widget_px(
@@ -158,8 +191,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     )
   end
 
-  @impl true
-  def handle_event("remove_widget", %{"id" => instance_id}, socket) do
+  defp do_handle_event("remove_widget", %{"id" => instance_id}, socket) do
     apply_layout(
       socket,
       Dashboards.remove_widget(socket.assigns.dashboard, instance_id, actor_opts(socket))
@@ -170,9 +202,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # (the active bp). x/y are 0-based grid cells; the context clamps to the tier
   # and refuses an occupied spot (the hook never offers one — stale/crafted
   # events only, so the error is a silent no-op).
-  @impl true
-  def handle_event("move_widget_grid", %{"id" => id, "x" => x, "y" => y}, socket)
-      when is_binary(id) do
+  defp do_handle_event("move_widget_grid", %{"id" => id, "x" => x, "y" => y}, socket)
+       when is_binary(id) do
     apply_layout(
       socket,
       Dashboards.place_widget_grid(
@@ -188,9 +219,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # Legacy/no-JS re-pack: set the given id order as the reading order and pack
   # the widgets compactly in it (kept server-side; the drag hook places cells
   # directly via move_widget_grid).
-  @impl true
-  def handle_event("reorder_widgets", %{"ordered_ids" => ordered_ids} = params, socket)
-      when is_list(ordered_ids) do
+  defp do_handle_event("reorder_widgets", %{"ordered_ids" => ordered_ids} = params, socket)
+       when is_list(ordered_ids) do
     case Dashboards.reorder_widgets(
            socket.assigns.dashboard,
            socket.assigns.active_layout,
@@ -207,8 +237,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end
   end
 
-  @impl true
-  def handle_event("set_layout", %{"id" => id}, socket) when is_binary(id) do
+  defp do_handle_event("set_layout", %{"id" => id}, socket) when is_binary(id) do
     if Dashboards.get_layout(socket.assigns.dashboard, id) do
       {:noreply, socket |> assign(:active_layout, id) |> assign(:renaming_layout, nil)}
     else
@@ -218,8 +247,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   # "+" — instant-create seeded from the active layout (doubles as duplicate),
   # activate it, and drop straight into rename mode.
-  @impl true
-  def handle_event("add_layout", _params, socket) do
+  defp do_handle_event("add_layout", _params, socket) do
     case Dashboards.add_layout(socket.assigns.dashboard, socket.assigns.active_layout) do
       {:ok, dashboard, entry} ->
         {:noreply,
@@ -233,19 +261,16 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end
   end
 
-  @impl true
-  def handle_event("start_rename_layout", %{"id" => id}, socket) when is_binary(id) do
+  defp do_handle_event("start_rename_layout", %{"id" => id}, socket) when is_binary(id) do
     {:noreply, assign(socket, :renaming_layout, id)}
   end
 
-  @impl true
-  def handle_event("cancel_rename_layout", _params, socket) do
+  defp do_handle_event("cancel_rename_layout", _params, socket) do
     {:noreply, assign(socket, :renaming_layout, nil)}
   end
 
-  @impl true
-  def handle_event("rename_layout", %{"id" => id, "name" => name}, socket)
-      when is_binary(id) and is_binary(name) do
+  defp do_handle_event("rename_layout", %{"id" => id, "name" => name}, socket)
+       when is_binary(id) and is_binary(name) do
     case Dashboards.rename_layout(socket.assigns.dashboard, id, name) do
       {:ok, dashboard} ->
         {:noreply, socket |> assign(:dashboard, dashboard) |> assign(:renaming_layout, nil)}
@@ -255,8 +280,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end
   end
 
-  @impl true
-  def handle_event("delete_layout", %{"id" => id}, socket) when is_binary(id) do
+  defp do_handle_event("delete_layout", %{"id" => id}, socket) when is_binary(id) do
     case Dashboards.delete_layout(socket.assigns.dashboard, id) do
       {:ok, dashboard} ->
         # If the active layout died, fall back to the first remaining one.
@@ -282,15 +306,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end
   end
 
-  @impl true
-  def handle_event("toggle_grid_lines", _params, socket) do
+  defp do_handle_event("toggle_grid_lines", _params, socket) do
     {:noreply, update(socket, :show_grid_lines, &(!&1))}
   end
 
   # Exact lattice dimensions from the Layout bar's inputs. Values clamp into
   # the lattice bounds and never below the extent widgets occupy.
-  @impl true
-  def handle_event("set_dims", %{"cols" => cols, "rows" => rows}, socket) do
+  defp do_handle_event("set_dims", %{"cols" => cols, "rows" => rows}, socket) do
     apply_layout(
       socket,
       Dashboards.set_grid_dims(
@@ -304,8 +326,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   # "Fit screen": the DashboardFitScreen hook reports the real screen pixels;
   # the layout becomes that screen's shape on the 25px lattice.
-  @impl true
-  def handle_event("fit_screen", %{"w" => w, "h" => h}, socket) do
+  defp do_handle_event("fit_screen", %{"w" => w, "h" => h}, socket) do
     cell = Lattice.cell()
 
     apply_layout(
@@ -324,8 +345,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # On the GRID the view is PER LAYOUT (designing the phone layout means
   # choosing how widgets look on the phone); the pixel canvas has no layouts,
   # so there it cycles the instance default.
-  @impl true
-  def handle_event("cycle_view", %{"id" => instance_id}, socket) when is_binary(instance_id) do
+  defp do_handle_event("cycle_view", %{"id" => instance_id}, socket)
+       when is_binary(instance_id) do
     dashboard = socket.assigns.dashboard
     grid? = Dashboard.layout_mode(dashboard) == "grid"
 
@@ -351,8 +372,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end
   end
 
-  @impl true
-  def handle_event("grid_dim", %{"dim" => dim, "delta" => delta}, socket) do
+  defp do_handle_event("grid_dim", %{"dim" => dim, "delta" => delta}, socket) do
     with {:ok, dim} <- Map.fetch(%{"cols" => :cols, "rows" => :rows}, dim),
          d when d in [-1, 1] <- to_i(delta) do
       case Dashboards.resize_grid(socket.assigns.dashboard, socket.assigns.active_layout, dim, d) do
@@ -388,9 +408,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   # Free/pixel-canvas resize (DashboardResize hook, free mode): absolute px size,
   # no snap. Stored under fw/fh; the context clamps to a sane px range.
-  @impl true
-  def handle_event("resize_widget_to", %{"id" => id, "fw" => fw, "fh" => fh}, socket)
-      when is_binary(id) do
+  defp do_handle_event("resize_widget_to", %{"id" => id, "fw" => fw, "fh" => fh}, socket)
+       when is_binary(id) do
     apply_layout(
       socket,
       Dashboards.resize_widget_px(socket.assigns.dashboard, id, to_i(fw), to_i(fh))
@@ -399,9 +418,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   # Grid-mode resize (active layout): the card snaps to the nearest cell on
   # release. The context clamps to the widget type's min/max + the bp's columns.
-  @impl true
-  def handle_event("resize_widget_to", %{"id" => id, "w" => w, "h" => h}, socket)
-      when is_binary(id) do
+  defp do_handle_event("resize_widget_to", %{"id" => id, "w" => w, "h" => h}, socket)
+       when is_binary(id) do
     with rw when rw >= 1 <- to_i(w),
          rh when rh >= 1 <- to_i(h) do
       apply_layout(
@@ -423,9 +441,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   # Pushed by the DashboardFreeDrag hook after a drag in the free canvas; fx/fy are
   # the absolute px position (no cell snap).
-  @impl true
-  def handle_event("move_widget_to", %{"id" => id, "fx" => fx, "fy" => fy}, socket)
-      when is_binary(id) do
+  defp do_handle_event("move_widget_to", %{"id" => id, "fx" => fx, "fy" => fy}, socket)
+       when is_binary(id) do
     apply_layout(
       socket,
       Dashboards.place_widget_px(socket.assigns.dashboard, id, to_i(fx), to_i(fy))
@@ -434,24 +451,20 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   # Bring a pixel widget above (or below) every other one — overlap on the free
   # canvas is allowed, z-order makes it deliberate.
-  @impl true
-  def handle_event("restack_widget", %{"id" => id, "dir" => dir}, socket)
-      when is_binary(id) and dir in ["front", "back"] do
+  defp do_handle_event("restack_widget", %{"id" => id, "dir" => dir}, socket)
+       when is_binary(id) and dir in ["front", "back"] do
     apply_layout(socket, Dashboards.restack_widget_px(socket.assigns.dashboard, id, dir))
   end
 
-  @impl true
-  def handle_event("open_settings", %{"id" => instance_id}, socket) do
+  defp do_handle_event("open_settings", %{"id" => instance_id}, socket) do
     {:noreply, assign(socket, :settings_instance, instance_id)}
   end
 
-  @impl true
-  def handle_event("close_settings", _params, socket) do
+  defp do_handle_event("close_settings", _params, socket) do
     {:noreply, assign(socket, :settings_instance, nil)}
   end
 
-  @impl true
-  def handle_event("save_settings", params, socket) do
+  defp do_handle_event("save_settings", params, socket) do
     case socket.assigns.settings_instance do
       nil -> {:noreply, socket}
       instance_id -> save_settings(socket, instance_id, params)
@@ -459,8 +472,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   end
 
   # Ignore any malformed / unexpected event rather than crashing the builder.
-  @impl true
-  def handle_event(event, _params, socket) do
+  defp do_handle_event(event, _params, socket) do
     Logger.debug("[Dashboards] Unhandled event: #{inspect(event)}")
     {:noreply, socket}
   end
