@@ -68,8 +68,9 @@ def phoenix_kit_widgets do
       icon: "hero-envelope",
       module_key: "emails",                # gates visibility by enablement + permission
       component: PhoenixKitEmails.Widgets.DeliverabilityLive,  # a Phoenix.LiveComponent
-      default_size: %{w: 6, h: 2},
-      min_size: %{w: 3, h: 1},
+      # Lattice units (25px nominal square cells; a screenful is e.g. 64×36).
+      default_size: %{w: 16, h: 8},
+      min_size: %{w: 8, h: 4},
       settings_schema: [
         %{key: "window", type: :select, label: "Window",
           options: ["7d", "30d", "90d"], default: "30d"}
@@ -87,6 +88,22 @@ customizations), `:view` (the selected render variant, or `nil`), `:size`
 See `PhoenixKitDashboards.Widgets.NoteWidget` for the smallest reference
 component, `Widgets.ClockWidget` for the full view/size/settings shape, and
 `PhoenixKitDashboards.Widget` for the whole contract.
+
+## Exposing widgets from the host app
+
+The host app contributes widgets the same way without being a PhoenixKit
+module — declare provider modules in config:
+
+```elixir
+# config/config.exs
+config :phoenix_kit_dashboards, widget_providers: [MyAppWeb.Widgets]
+```
+
+Each listed module exports the same `phoenix_kit_widgets/0` plain-map
+contract as above. A host widget without a `module_key` is always offered in
+the catalog; set one to gate it on that module's enablement and permission
+like any module widget. Call `PhoenixKitDashboards.Registry.refresh/0` after
+changing the config at runtime.
 
 ## Architecture
 

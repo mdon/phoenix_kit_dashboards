@@ -72,6 +72,63 @@ defmodule PhoenixKitDashboardsTest do
     end
   end
 
+  describe "host-app widget providers (config :phoenix_kit_dashboards, :widget_providers)" do
+    defmodule HostComponent do
+      use Phoenix.LiveComponent
+      def render(assigns), do: ~H""
+    end
+
+    defmodule HostWidgets do
+      def phoenix_kit_widgets do
+        [
+          %{
+            key: "host.custom",
+            name: "Host custom",
+            component: PhoenixKitDashboardsTest.HostComponent,
+            category: "Host"
+          }
+        ]
+      end
+    end
+
+    defmodule NotAProvider do
+    end
+
+    setup do
+      on_exit(fn ->
+        Application.delete_env(:phoenix_kit_dashboards, :widget_providers)
+        Registry.refresh()
+      end)
+    end
+
+    test "a config-declared provider's widgets join the catalog" do
+      Application.put_env(:phoenix_kit_dashboards, :widget_providers, [HostWidgets])
+      Registry.refresh()
+
+      assert %Widget{name: "Host custom", source: HostWidgets} = Registry.get("host.custom")
+      # No module_key -> always offered, like the built-ins.
+      assert "host.custom" in Enum.map(Registry.list_for_scope(:any_scope), & &1.key)
+    end
+
+    test "junk provider entries are ignored, valid ones still load" do
+      Application.put_env(:phoenix_kit_dashboards, :widget_providers, [
+        NotAProvider,
+        "not a module",
+        NoSuch.Module,
+        HostWidgets
+      ])
+
+      Registry.refresh()
+      assert Registry.get("host.custom")
+    end
+
+    test "without the config the catalog is unchanged" do
+      Application.delete_env(:phoenix_kit_dashboards, :widget_providers)
+      Registry.refresh()
+      refute Registry.get("host.custom")
+    end
+  end
+
   describe "Registry.visible_for_scope?/2 (the placed-widget render gate)" do
     defmodule GateComponent do
       use Phoenix.LiveComponent
