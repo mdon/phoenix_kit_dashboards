@@ -838,10 +838,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
     ~H"""
     <div class="flex items-center gap-2 border-b border-base-300 bg-base-100 px-4 py-1.5">
+      <%!-- overflow-y-hidden: overflow-x-auto forces the OTHER axis to compute
+      as auto too, so daisyUI's .btn:active 0.5px press-shift would otherwise
+      pop a scrollbar for as long as a tab is held down. --%>
       <div
         role="tablist"
         aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard layouts")}
-        class="flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto"
+        class="flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden"
       >
         <%= for entry <- @entries do %>
           <form
