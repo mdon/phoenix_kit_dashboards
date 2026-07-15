@@ -12,6 +12,7 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   require Logger
 
+  alias PhoenixKit.PubSubHelper
   alias PhoenixKit.RepoHelper
   alias PhoenixKitDashboards.Grid
   alias PhoenixKitDashboards.Lattice
@@ -204,16 +205,23 @@ defmodule PhoenixKitDashboards.Dashboards do
   def update(%Dashboard{} = dashboard, attrs, opts \\ []) do
     dashboard
     |> Dashboard.changeset(attrs)
-    |> repo().update()
+    |> persist()
     |> log_on_ok("dashboard.updated", opts)
   end
 
   @doc "Delete a dashboard."
   @spec delete(Dashboard.t(), keyword()) :: {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
   def delete(%Dashboard{} = dashboard, opts \\ []) do
-    dashboard
-    |> repo().delete()
-    |> log_on_ok("dashboard.deleted", opts)
+    result =
+      dashboard
+      |> repo().delete()
+      |> log_on_ok("dashboard.deleted", opts)
+
+    with {:ok, deleted} <- result do
+      broadcast(topic(deleted.uuid), {:dashboard_deleted, deleted.uuid})
+    end
+
+    result
   end
 
   @doc "Persist a new full layout (the hot path while editing the grid)."
@@ -222,7 +230,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   def save_layout(%Dashboard{} = dashboard, layout) when is_list(layout) do
     dashboard
     |> Dashboard.layout_changeset(layout)
-    |> repo().update()
+    |> persist()
   end
 
   @doc """
@@ -642,7 +650,7 @@ defmodule PhoenixKitDashboards.Dashboards do
     dashboard
     |> Ecto.Changeset.change(config: config)
     |> Ecto.Changeset.force_change(:layout, layout)
-    |> repo().update()
+    |> persist()
     |> case do
       {:ok, updated} -> {:ok, updated, entry}
       error -> error
@@ -712,7 +720,7 @@ defmodule PhoenixKitDashboards.Dashboards do
         dashboard
         |> Ecto.Changeset.change(config: config)
         |> Ecto.Changeset.force_change(:layout, layout)
-        |> repo().update()
+        |> persist()
     end
   end
 
@@ -783,7 +791,7 @@ defmodule PhoenixKitDashboards.Dashboards do
         dashboard
         |> Ecto.Changeset.change(config: config)
         |> Ecto.Changeset.force_change(:layout, dashboard.layout)
-        |> repo().update()
+        |> persist()
     end
   end
 
@@ -1161,7 +1169,92 @@ defmodule PhoenixKitDashboards.Dashboards do
     dashboard
     |> Ecto.Changeset.change()
     |> Ecto.Changeset.force_change(:layout, layout)
-    |> repo().update()
+    |> persist()
+  end
+
+  # ── Live sync + optimistic concurrency (the single write choke point) ──
+  #
+  # `persist/1` is the ONE place a dashboard mutation reaches the database, so
+  # it owns two guarantees:
+  #
+  #   1. LIVE SYNC — on success it broadcasts the new state to every subscribed
+  #      session, so a dashboard open on a TV re-renders the instant someone
+  #      edits it from their laptop (`subscribe/1` + `{:dashboard_updated, _}`).
+  #
+  #   2. NO SILENT LOST UPDATES — an optimistic lock on a monotonic
+  #      `config["rev"]` counter (compare-and-swap, so NO schema migration): the
+  #      write only lands if `rev` is still what we read. A concurrent session
+  #      that wrote first bumps `rev`, our CAS matches 0 rows, and we return
+  #      `{:error, :stale}` instead of clobbering their edit — the LiveView
+  #      re-syncs (and PubSub has already pushed it the winning state anyway).
+  @topic_prefix "phoenix_kit_dashboards:"
+
+  @doc "The PubSub topic carrying one dashboard's live updates."
+  @spec topic(String.t()) :: String.t()
+  def topic(uuid) when is_binary(uuid), do: @topic_prefix <> uuid
+
+  @doc """
+  Subscribe the caller to a dashboard's live updates. Delivers
+  `{:dashboard_updated, %Dashboard{}}` on every edit and `{:dashboard_deleted,
+  uuid}` when it's removed — the spine of live multi-session editing.
+  """
+  @spec subscribe(String.t()) :: :ok | {:error, term()}
+  def subscribe(uuid) when is_binary(uuid) do
+    PubSubHelper.subscribe(topic(uuid))
+  rescue
+    # A missing/misconfigured PubSub server (or a test env without one) must
+    # not crash the mount — the page just loses live sync, not correctness.
+    _ -> {:error, :pubsub_unavailable}
+  end
+
+  defp persist(%Ecto.Changeset{} = changeset) do
+    with {:ok, _applied} <- Ecto.Changeset.apply_action(changeset, :update) do
+      original = changeset.data
+      expected = rev(original)
+
+      base_config = Map.get(changeset.changes, :config, original.config || %{})
+      new_config = Map.put(base_config, "rev", expected + 1)
+      now = DateTime.truncate(DateTime.utc_now(), :second)
+
+      set =
+        changeset.changes
+        |> Map.put(:config, new_config)
+        |> Map.put(:updated_at, now)
+        |> Map.to_list()
+
+      {count, _} =
+        Dashboard
+        |> where([d], d.uuid == ^original.uuid)
+        |> where([d], fragment("coalesce((?->>'rev')::int, 0)", d.config) == ^expected)
+        |> repo().update_all(set: set)
+
+      if count == 1 do
+        updated = Ecto.Changeset.apply_changes(changeset)
+        updated = %{updated | config: new_config, updated_at: now}
+        broadcast(topic(updated.uuid), {:dashboard_updated, updated})
+        {:ok, updated}
+      else
+        {:error, :stale}
+      end
+    end
+  end
+
+  defp rev(%Dashboard{config: config}) when is_map(config) do
+    case Map.get(config, "rev") do
+      n when is_integer(n) -> n
+      _ -> 0
+    end
+  end
+
+  defp rev(_), do: 0
+
+  # Broadcast never crashes a mutation: a missing/misconfigured PubSub server
+  # must not fail the write (the edit still persisted).
+  defp broadcast(topic, message) do
+    PubSubHelper.broadcast(topic, message)
+    :ok
+  rescue
+    _ -> :ok
   end
 
   # A designed layout: stored explicit cells render verbatim; order-only
@@ -1264,7 +1357,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   defp put_config(dashboard, key, value) do
     dashboard
     |> Dashboard.config_changeset(Map.put(dashboard.config, key, value))
-    |> repo().update()
+    |> persist()
   end
 
   # Min/max span bounds for an INSTANCE — the min comes from its selected view

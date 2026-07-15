@@ -180,6 +180,33 @@ defmodule PhoenixKitDashboards.DashboardsTest do
     end
   end
 
+  describe "optimistic concurrency (no silent lost updates)" do
+    test "a write from a stale snapshot is refused, never clobbers the newer state" do
+      {:ok, d0} = Dashboards.create(%{title: "Race", scope: "system"})
+      {:ok, d1} = Dashboards.add_widget(d0, "core.note")
+
+      # `d1` is now stale relative to the DB after this second write lands...
+      {:ok, _d2} = Dashboards.add_widget(d1, "core.clock")
+
+      # ...so a third write built on `d1` must be rejected, not silently
+      # overwrite the clock that `d2` added.
+      assert {:error, :stale} = Dashboards.add_widget(d1, "core.module_stats")
+
+      # The clock survived; the stale write dropped nothing.
+      keys = Dashboards.get(d0.uuid).layout |> Enum.map(& &1["widget_key"])
+      assert "core.clock" in keys
+      refute "core.module_stats" in keys
+    end
+
+    test "threading the returned struct lets sequential edits proceed" do
+      {:ok, d0} = Dashboards.create(%{title: "Seq", scope: "system"})
+      {:ok, d1} = Dashboards.add_widget(d0, "core.note")
+      {:ok, d2} = Dashboards.add_widget(d1, "core.clock")
+      assert {:ok, _d3} = Dashboards.add_widget(d2, "core.module_stats")
+      assert length(Dashboards.get(d0.uuid).layout) == 3
+    end
+  end
+
   describe "widget operations" do
     setup do
       {:ok, dashboard} = Dashboards.create(%{title: "Grid", scope: "system"})
@@ -302,8 +329,9 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert %{"w" => 8, "h" => 4} = Layout.placement(hd(small.layout), "l1")
 
       # The default layout is a 64×36 screenful → the span clamps to it (a
-      # widget can never resize past the screenful's edges).
-      assert {:ok, big} = Dashboards.resize_widget(dashboard, id, "l1", 999, 999)
+      # widget can never resize past the screenful's edges). Thread `small`:
+      # the optimistic lock rejects a second write from the stale `dashboard`.
+      assert {:ok, big} = Dashboards.resize_widget(small, id, "l1", 999, 999)
       assert %{"w" => 64, "h" => 36} = Layout.placement(hd(big.layout), "l1")
     end
 
@@ -720,7 +748,8 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       {:ok, moved} = Dashboards.place_widget_px(d, id, 240, 130)
       assert %{"fx" => 240, "fy" => 130} = Layout.pixel(hd(moved.layout))
 
-      {:ok, clamped} = Dashboards.place_widget_px(d, id, -50, -10)
+      # Thread `moved` — a second write from the stale `d` is refused by the lock.
+      {:ok, clamped} = Dashboards.place_widget_px(moved, id, -50, -10)
       assert %{"fx" => 0, "fy" => 0} = Layout.pixel(hd(clamped.layout))
     end
 
@@ -728,7 +757,7 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       {:ok, sized} = Dashboards.resize_widget_px(d, id, 320, 210)
       assert %{"fw" => 320, "fh" => 210} = Layout.pixel(hd(sized.layout))
 
-      {:ok, clamped} = Dashboards.resize_widget_px(d, id, 5, 99_999)
+      {:ok, clamped} = Dashboards.resize_widget_px(sized, id, 5, 99_999)
       assert %{"fw" => 60, "fh" => 4000} = Layout.pixel(hd(clamped.layout))
     end
 

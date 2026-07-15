@@ -72,7 +72,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   @free_max_px 4000
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(params, _session, socket) do
+    # LIVE SYNC: subscribe to this dashboard's edits so a session viewing it
+    # (e.g. a wall TV) re-renders the instant anyone edits it from elsewhere.
+    if connected?(socket) and is_binary(params["uuid"]) do
+      Dashboards.subscribe(params["uuid"])
+    end
+
     {:ok,
      socket
      |> assign(:catalog, Registry.list_for_scope(socket.assigns[:phoenix_kit_current_scope]))
@@ -609,6 +615,46 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end
   end
 
+  # LIVE SYNC: another session edited this dashboard — adopt the pushed state
+  # (it's the authoritative post-write struct). Re-check access (it may have
+  # been re-scoped away), re-validate the active layout (it may have been
+  # deleted remotely), and keep the live-refresh loop honest.
+  @impl true
+  def handle_info({:dashboard_updated, dashboard}, socket) do
+    if dashboard.uuid == socket.assigns.dashboard.uuid do
+      if can_view?(dashboard, socket) do
+        {:noreply,
+         socket
+         |> assign(:dashboard, dashboard)
+         |> ensure_active_layout()
+         |> maybe_schedule_refresh()}
+      else
+        {:noreply,
+         socket
+         |> put_flash(
+           :error,
+           Gettext.gettext(PhoenixKitWeb.Gettext, "You no longer have access to this dashboard.")
+         )
+         |> push_navigate(to: Paths.index())}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # LIVE SYNC: the dashboard was deleted out from under this session.
+  @impl true
+  def handle_info({:dashboard_deleted, uuid}, socket) do
+    if uuid == socket.assigns.dashboard.uuid do
+      {:noreply,
+       socket
+       |> put_flash(:info, Gettext.gettext(PhoenixKitWeb.Gettext, "This dashboard was deleted."))
+       |> push_navigate(to: Paths.index())}
+    else
+      {:noreply, socket}
+    end
+  end
+
   @impl true
   def handle_info(msg, socket) do
     Logger.debug("[Dashboards] Unhandled info: #{inspect(msg)}")
@@ -730,6 +776,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   defp apply_layout(socket, {:ok, dashboard}),
     do: {:noreply, assign(socket, :dashboard, dashboard)}
 
+  defp apply_layout(socket, {:error, :stale}), do: {:noreply, resync(socket)}
   defp apply_layout(socket, {:error, _}), do: {:noreply, socket}
 
   # Shared add-widget outcome: assign + restart the refresh loop if the new
@@ -738,9 +785,35 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     {:noreply, socket |> assign(:dashboard, dashboard) |> maybe_schedule_refresh()}
   end
 
+  defp added(socket, {:error, :stale}), do: {:noreply, resync(socket)}
+
   defp added(socket, {:error, _}) do
     {:noreply,
      put_flash(socket, :error, Gettext.gettext(PhoenixKitWeb.Gettext, "Could not add widget."))}
+  end
+
+  # A concurrent session wrote first (optimistic-lock miss): reload the current
+  # state so the user is editing live truth, not their stale snapshot. The
+  # PubSub push carries the same state — this just makes the recovery immediate.
+  defp resync(socket) do
+    case Dashboards.get(socket.assigns.dashboard.uuid) do
+      nil ->
+        socket
+        |> put_flash(:error, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard not found."))
+        |> push_navigate(to: Paths.index())
+
+      dashboard ->
+        socket
+        |> assign(:dashboard, dashboard)
+        |> ensure_active_layout()
+        |> put_flash(
+          :info,
+          Gettext.gettext(
+            PhoenixKitWeb.Gettext,
+            "Reloaded — this dashboard was just edited elsewhere."
+          )
+        )
+    end
   end
 
   # The Settings modal's size inputs (server-driven resize fallback). Free mode
