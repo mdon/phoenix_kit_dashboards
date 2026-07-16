@@ -870,6 +870,22 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     PAGE and pop a window scrollbar — the builder is app-like, its grid/canvas
     panes scroll internally instead. --%>
     <div class="flex h-[calc(100dvh-4rem)] flex-col">
+      <%!-- FULLSCREEN = DISPLAY MODE: the Full-screen button natively
+      fullscreens the canvas pane, so the header/layout bar/catalog (outside it)
+      already vanish. These rules strip the remaining per-widget EDIT chrome —
+      the drag bar, resize grip, guides, and editor caption — so a wall TV shows
+      a clean dashboard, not an editor. (Esc exits; edits still flow in live.) --%>
+      <style>
+        :fullscreen .pk-widget-chrome,
+        :fullscreen .pk-resize-handle,
+        :fullscreen .pk-grid-caption,
+        :fullscreen .pk-empty-hint {
+          display: none !important;
+        }
+        :fullscreen #dashboard-grid {
+          background-image: none !important;
+        }
+      </style>
       <div class="flex items-center justify-between px-4 py-3 border-b border-base-300">
         <div class="flex items-center gap-3">
           <.link navigate={Paths.index()} class="btn btn-ghost btn-sm">
@@ -969,7 +985,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         floating over it. --%>
         <div
           :if={@dashboard.layout == [] and @mode != "grid"}
-          class="flex flex-1 flex-col items-center justify-center bg-base-200 text-base-content/40"
+          class="pk-empty-hint flex flex-1 flex-col items-center justify-center bg-base-200 text-base-content/40"
         >
           <.icon name="hero-squares-plus" class="w-12 h-12" />
           <p class="mt-2">{Gettext.gettext(PhoenixKitWeb.Gettext, "Add widgets from the panel on the right.")}</p>
@@ -1202,7 +1218,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         catalog drops land on the cells underneath. --%>
         <div
           :if={@empty}
-          class="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center text-base-content/40"
+          class="pk-empty-hint pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center text-base-content/40"
         >
           <.icon name="hero-squares-plus" class="w-12 h-12" />
           <p class="mt-2">
@@ -1383,7 +1399,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       <div
         class={[
           grip_class(@mode),
-          "flex cursor-grab touch-none select-none items-center justify-between gap-1",
+          "pk-widget-chrome flex cursor-grab touch-none select-none items-center justify-between gap-1",
           "border-b border-base-300 bg-base-200/40 px-1.5 py-1"
         ]}
         title={grip_title(@mode)}

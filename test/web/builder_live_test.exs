@@ -765,6 +765,24 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
     end
   end
 
+  describe "fullscreen display mode" do
+    test "renders the display-mode CSS and the hideable widget chrome", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, _dashboard} = Dashboards.add_widget(dashboard, "core.note")
+
+      {:ok, _view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+
+      # The Full-screen button fullscreens the canvas pane...
+      assert html =~ ~s(phx-hook="DashboardFullscreen")
+      # ...and these rules strip the edit chrome inside it (a clean TV display).
+      assert html =~ ":fullscreen .pk-widget-chrome"
+      assert html =~ "display: none !important"
+      # The widget's edit bar carries the class those rules hide.
+      assert html =~ "pk-widget-chrome"
+    end
+  end
+
   describe "stale-session safety" do
     test "an external edit survives a mutation from an already-mounted session", %{conn: conn} do
       {conn, user} = sign_in(conn)
