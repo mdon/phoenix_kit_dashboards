@@ -242,4 +242,23 @@ defmodule PhoenixKitDashboards.Web.DashboardsLiveTest do
       assert render_click(view, "delete", %{"uuid" => "not-a-uuid"}) =~ "Could not delete"
     end
   end
+
+  describe "unhandled events (catch-all)" do
+    test "an unrecognized event name is ignored, not a crash", %{conn: conn} do
+      {conn, _user} = sign_in(conn)
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards")
+
+      assert render_click(view, "some_future_event", %{"foo" => "bar"}) =~ "Create dashboard"
+    end
+
+    test "clone/delete with no uuid param falls through to the catch-all, not a crash", %{
+      conn: conn
+    } do
+      {conn, _user} = sign_in(conn)
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards")
+
+      assert render_click(view, "clone", %{}) =~ "Create dashboard"
+      assert render_click(view, "delete", %{}) =~ "Create dashboard"
+    end
+  end
 end

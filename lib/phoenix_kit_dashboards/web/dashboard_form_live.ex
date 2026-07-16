@@ -131,7 +131,19 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
          |> put_flash(:info, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard updated."))
          |> push_navigate(to: Paths.index())}
 
-      {:error, _changeset} ->
+      {:error, :stale} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :error,
+           Gettext.gettext(
+             PhoenixKitWeb.Gettext,
+             "This dashboard was just edited elsewhere — please try again."
+           )
+         )
+         |> push_navigate(to: Paths.index())}
+
+      {:error, %Ecto.Changeset{}} ->
         {:noreply,
          put_flash(
            socket,

@@ -1357,6 +1357,10 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         self.pushEvent(document.hidden ? "refresh_pause" : "refresh_resume", {});
       };
       document.addEventListener("visibilitychange", this._onVis);
+      // A dashboard can mount already hidden (opened into a background tab,
+      // several tabs restored at once) — sync the loop's initial state instead
+      // of waiting for the FIRST visibilitychange to fire.
+      if (document.hidden) self.pushEvent("refresh_pause", {});
     },
 
     destroyed() {

@@ -26,7 +26,7 @@ defmodule PhoenixKitDashboards.GridTest do
     end
   end
 
-  describe "first_free/4" do
+  describe "first_free/4,5" do
     test "finds the first gap in reading order" do
       # Row 0: [0..3] and [8..11] taken — a 4-wide gap at x=4.
       others = [p(0, 0, 4, 2), p(8, 0, 4, 2)]
@@ -38,9 +38,26 @@ defmodule PhoenixKitDashboards.GridTest do
     test "empty grid places at the origin" do
       assert Grid.first_free([], 4, 2, 12) == {0, 0}
     end
+
+    test "with a rows bound, never returns a y past the layout's last row" do
+      # A 4x4 layout (rows 0..3) packed solid with 1x1s — no free cell for a
+      # 5th, so the caller's below_all/1 fallback must be used, NOT a y
+      # outside the layout (a screenful must never scroll).
+      others = for x <- 0..3, y <- 0..3, do: p(x, y, 1, 1)
+      assert Grid.first_free(others, 1, 1, 4, 4) == nil
+      # Without a rows bound (default), the same occupancy still finds a spot
+      # past row 3 — this is the documented default behavior for callers that
+      # don't have a layout row count of their own.
+      assert Grid.first_free(others, 1, 1, 4) == {0, 4}
+    end
+
+    test "with a rows bound, still finds a free cell inside the bound" do
+      others = [p(0, 0, 4, 2)]
+      assert Grid.first_free(others, 4, 2, 4, 4) == {0, 2}
+    end
   end
 
-  describe "compact/2" do
+  describe "compact/2,3" do
     test "packs spans first-fit in list order, clamping to the columns" do
       packed =
         Grid.compact([%{"w" => 8, "h" => 2}, %{"w" => 6, "h" => 1}, %{"w" => 4, "h" => 1}], 12)
@@ -55,6 +72,14 @@ defmodule PhoenixKitDashboards.GridTest do
 
     test "clamps a span wider than the target columns (tier derivation)" do
       assert [%{"x" => 0, "y" => 0, "w" => 4}] = Grid.compact([%{"w" => 10, "h" => 2}], 4)
+    end
+
+    test "with a rows bound, falls back to stacking below the screenful instead of overflowing it" do
+      # Two 4x4 (16-cell) widgets can't both fit inside a 4x4 layout (16 cells
+      # total, but a 4x4 span needs the whole grid) — the second must stack
+      # below row 4, not silently take a y inside 0..3 that would overlap.
+      packed = Grid.compact([%{"w" => 4, "h" => 4}, %{"w" => 4, "h" => 4}], 4, 4)
+      assert [%{"x" => 0, "y" => 0}, %{"x" => 0, "y" => 4}] = packed
     end
   end
 

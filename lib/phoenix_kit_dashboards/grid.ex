@@ -52,14 +52,17 @@ defmodule PhoenixKitDashboards.Grid do
   @doc """
   The first `{x, y}` (reading order: row by row, left to right) where a `w`×`h`
   rectangle fits without overlapping `others`. Spans wider than the grid are
-  handled by the caller (clamp first); `nil` only if the grid is packed solid
-  through `max_rows/0` (practically unreachable).
+  handled by the caller (clamp first); `nil` if the grid is packed solid
+  through `rows` (the caller's `below_all/1` fallback then stacks below the
+  screenful — expected on a small/full layout, not "practically unreachable").
+  `rows` defaults to `max_rows/0` for callers with no row bound of their own.
   """
-  @spec first_free([map()], pos_integer(), pos_integer(), pos_integer()) ::
+  @spec first_free([map()], pos_integer(), pos_integer(), pos_integer(), pos_integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
-  def first_free(others, w, h, cols) do
+  def first_free(others, w, h, cols, rows \\ @max_rows) do
     w = min(w, cols)
-    Enum.find_value(0..(@max_rows - h), &free_x_in_row(&1, others, w, h, cols))
+    max_y = min(rows, @max_rows) - h
+    if max_y < 0, do: nil, else: Enum.find_value(0..max_y, &free_x_in_row(&1, others, w, h, cols))
   end
 
   defp free_x_in_row(y, others, w, h, cols) do
@@ -88,18 +91,21 @@ defmodule PhoenixKitDashboards.Grid do
   Pack `placements` (their `w`/`h` spans, in list order) into explicit cells on
   a `cols`-wide grid: each gets the first free rectangle in reading order, spans
   clamped to the column count. Returns the placements with `"x"`/`"y"` set.
+  `rows` defaults to `max_rows/0`; pass the layout's real row count so a full
+  screenful falls back to `below_all/1` instead of packing past the visible
+  bottom edge.
 
   This is the "reflow + compact" primitive behind widget reorder (sorted to
   reading order first by the caller).
   """
-  @spec compact([map()], pos_integer()) :: [map()]
-  def compact(placements, cols) do
+  @spec compact([map()], pos_integer(), pos_integer()) :: [map()]
+  def compact(placements, cols, rows \\ @max_rows) do
     {packed, _occupied} =
       Enum.map_reduce(placements, [], fn p, occupied ->
         w = min(max(p["w"] || 1, 1), cols)
         h = max(p["h"] || 1, 1)
 
-        {x, y} = first_free(occupied, w, h, cols) || {0, below_all(occupied)}
+        {x, y} = first_free(occupied, w, h, cols, rows) || {0, below_all(occupied)}
         placed = p |> Map.put("x", x) |> Map.put("y", y) |> Map.put("w", w)
         {placed, [placed | occupied]}
       end)

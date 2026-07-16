@@ -362,7 +362,10 @@ defmodule PhoenixKitDashboards.Dashboards do
     seed_h = min(h, grid_rows(dashboard, home))
 
     occupied = dashboard |> resolve_items(home) |> Enum.map(fn {_i, p} -> p end)
-    {x, y} = Grid.first_free(occupied, seed_w, seed_h, cols) || {0, Grid.below_all(occupied)}
+
+    {x, y} =
+      Grid.first_free(occupied, seed_w, seed_h, cols, grid_rows(dashboard, home)) ||
+        {0, Grid.below_all(occupied)}
 
     %{
       "id" => UUIDv7.generate(),
@@ -401,6 +404,7 @@ defmodule PhoenixKitDashboards.Dashboards do
       when is_binary(bp) and is_list(ordered_ids) do
     dashboard = materialize_grid(dashboard, bp)
     cols = grid_cols(dashboard, bp)
+    rows = grid_rows(dashboard, bp)
 
     order =
       ordered_ids |> Enum.filter(&is_binary/1) |> Enum.uniq() |> Enum.with_index() |> Map.new()
@@ -415,7 +419,7 @@ defmodule PhoenixKitDashboards.Dashboards do
     packed =
       ranked
       |> Enum.map(fn {item, _idx} -> Layout.placement(item, bp) end)
-      |> Grid.compact(cols)
+      |> Grid.compact(cols, rows)
 
     placements =
       ranked
@@ -648,7 +652,7 @@ defmodule PhoenixKitDashboards.Dashboards do
       dashboard
       |> resolve_items(source["id"])
       |> Enum.map(fn {_item, p} -> p end)
-      |> Grid.compact(entry["cols"])
+      |> Grid.compact(entry["cols"], entry["rows"])
 
     seeds =
       dashboard
@@ -1278,7 +1282,7 @@ defmodule PhoenixKitDashboards.Dashboards do
       |> Enum.map_reduce(Enum.map(placed, fn {_i, p} -> p end), fn {item, p}, occupied ->
         w = p["w"] |> max(1) |> min(cols)
         h = p["h"] |> max(1) |> min(rows)
-        {x, y} = Grid.first_free(occupied, w, h, cols) || {0, Grid.below_all(occupied)}
+        {x, y} = Grid.first_free(occupied, w, h, cols, rows) || {0, Grid.below_all(occupied)}
         p2 = Map.merge(p, %{"x" => x, "y" => y, "w" => w, "h" => h})
         {{item, p2}, [p2 | occupied]}
       end)

@@ -74,6 +74,15 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
     end
   end
 
+  # Ignore any malformed / unexpected event rather than crashing the page
+  # (mirrors DashboardFormLive/BuilderLive — "clone"/"delete" above require a
+  # "uuid" param and would otherwise raise FunctionClauseError on a bad push).
+  @impl true
+  def handle_event(event, _params, socket) do
+    Logger.debug("[Dashboards] Unhandled event: #{inspect(event)}")
+    {:noreply, socket}
+  end
+
   @impl true
   def handle_info(msg, socket) do
     Logger.debug("[Dashboards] Unhandled info: #{inspect(msg)}")

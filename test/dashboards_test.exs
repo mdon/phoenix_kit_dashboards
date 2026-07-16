@@ -207,6 +207,17 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert {:ok, _d3} = Dashboards.add_widget(d2, "core.module_stats")
       assert length(Dashboards.get(d0.uuid).layout) == 3
     end
+
+    test "a metadata update/3 from a stale snapshot is also refused with :error, :stale" do
+      # update/3 (title/scope) shares persist/1's CAS with every other mutation —
+      # DashboardFormLive's do_update/2 must route this through resync, not the
+      # generic changeset-error branch (it's a distinct return, not a changeset).
+      {:ok, d0} = Dashboards.create(%{title: "Race", scope: "system"})
+      {:ok, _d1} = Dashboards.add_widget(d0, "core.note")
+
+      assert {:error, :stale} = Dashboards.update(d0, %{title: "Clobbered"})
+      assert Dashboards.get(d0.uuid).title == "Race"
+    end
   end
 
   describe "widget operations" do
