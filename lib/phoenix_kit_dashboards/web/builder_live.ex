@@ -89,7 +89,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
      |> assign(:active_layout, nil)
      # The layout id currently in inline-rename mode (nil = none).
      |> assign(:renaming_layout, nil)
-     |> assign(:refresh_at, %{})
      # QoL: show the empty grid cells while designing (session-local toggle).
      |> assign(:show_grid_lines, false)
      |> assign(:refresh_scheduled?, false)}
@@ -596,17 +595,24 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       |> Dashboards.resolve_items(socket.assigns.active_layout)
       |> Map.new(fn {item, p} -> {item["id"], p} end)
 
+    # The per-widget "last refreshed" map is bookkeeping the template never
+    # renders — keep it in the PROCESS DICTIONARY, not a socket assign. Assigning
+    # it would dirty the socket every tick and force a full-page re-render (which
+    # re-runs the admin layout's uncached settings query, and in dev occasionally
+    # lands in a code-reload window → crash → reconnect). This way a tick only
+    # `send_update`s the due widgets, which re-render on their own.
     refresh_at =
       Enum.reduce(
         socket.assigns.dashboard.layout,
-        socket.assigns.refresh_at,
+        Process.get(:pk_refresh_at, %{}),
         &refresh_due(&1, &2, now, scope, placements)
       )
 
-    socket = assign(socket, :refresh_at, refresh_at)
+    Process.put(:pk_refresh_at, refresh_at)
 
     if any_live_widget?(socket.assigns.dashboard) do
       Process.send_after(self(), :refresh_tick, @refresh_tick_ms)
+      # Socket UNCHANGED → no parent re-render; only the send_update'd widgets did.
       {:noreply, socket}
     else
       # Loop stops when no live widget remains; clear the latch so re-adding one
