@@ -3,35 +3,24 @@
 Customizable dashboards for [PhoenixKit](https://github.com/BeamLabEU/phoenix_kit).
 
 Compose dashboard pages from **widgets** contributed by any PhoenixKit module.
-A widget is a self-contained `Phoenix.LiveComponent`; a dashboard is a
-responsive grid of widget instances — each anchored at an explicit cell
-(gaps allowed, no overlap) and spanning `w` columns × `h` rows per breakpoint
-tier (TV 16 / Desktop 12 / iPad 8 / Phone 4 columns), with undesigned tiers
-auto-derived by reflow + compact. A second dashboard type is a **pixel canvas**
-(exact-px placement, deliberate overlap via z-order). The grid is
-**server-rendered** (Phoenix-first — it renders and is operable without
-JavaScript via the settings modal); drag/resize/catalog-drag are progressive
-enhancement via the module's own hooks (`js_sources/0`). Layouts persist per
-user (personal dashboards) and per system/role (shared dashboards).
-
-## Instant tier detection (recommended)
-
-The grid builder picks the responsive tier (TV/Desktop/iPad/Phone) that best
-fits the viewer's screen. By default that needs a client hook round-trip after
-connect, so the dashboard briefly shows a loading state. Pass the viewport in
-your LiveSocket connect params and the tier is resolved server-side at mount —
-the dashboard loads straight into the right layout:
-
-```js
-// assets/js/app.js — a closure so reconnects re-read the width
-const liveSocket = new LiveSocket("/live", Socket, {
-  params: () => ({_csrf_token: csrfToken, viewport_width: window.innerWidth}),
-  hooks: {...window.PhoenixKitHooks},
-})
-```
-
-Hosts that don't pass `viewport_width` keep working — detection falls back to
-the hook round-trip.
+A widget is a self-contained `Phoenix.LiveComponent`; a grid dashboard is an
+ordered set of **user-defined layouts** (e.g. "Desktop", "Wall TV",
+"Portrait door screen") — each a named `cols × rows` grid on a 25px square
+cell lattice representing **exactly one screenful** (nothing scrolls),
+managed from a tab strip in the builder (add copies the active layout;
+rename/delete inline; a "Fit screen" button sizes a layout to the current
+display). Widgets anchor at explicit cells (gaps allowed, no overlap); the
+canvas scales to the viewing pane — stretching to fill when the shapes
+roughly match, otherwise shown as a centered letterboxed artboard — and
+widget content self-fits via container queries, so a layout designed for a
+wall TV stays intact (just smaller) on a phone. A dashboard opens instantly
+on its first layout — or a specific one via the `?layout=<id>` deep link
+(handy for wall displays). A second dashboard type is a **pixel canvas** (exact-px placement,
+deliberate overlap via z-order). The grid is **server-rendered**
+(Phoenix-first — it renders and is operable without JavaScript via the
+settings modal); drag/resize/catalog-drag are progressive enhancement via the
+module's own hooks (`js_sources/0`). Dashboards persist per user (personal)
+and per system/role (shared).
 
 ## Installation
 
@@ -79,8 +68,9 @@ def phoenix_kit_widgets do
       icon: "hero-envelope",
       module_key: "emails",                # gates visibility by enablement + permission
       component: PhoenixKitEmails.Widgets.DeliverabilityLive,  # a Phoenix.LiveComponent
-      default_size: %{w: 6, h: 2},
-      min_size: %{w: 3, h: 1},
+      # Lattice units (25px nominal square cells; a screenful is e.g. 64×36).
+      default_size: %{w: 16, h: 8},
+      min_size: %{w: 8, h: 4},
       settings_schema: [
         %{key: "window", type: :select, label: "Window",
           options: ["7d", "30d", "90d"], default: "30d"}
@@ -98,6 +88,22 @@ customizations), `:view` (the selected render variant, or `nil`), `:size`
 See `PhoenixKitDashboards.Widgets.NoteWidget` for the smallest reference
 component, `Widgets.ClockWidget` for the full view/size/settings shape, and
 `PhoenixKitDashboards.Widget` for the whole contract.
+
+## Exposing widgets from the host app
+
+The host app contributes widgets the same way without being a PhoenixKit
+module — declare provider modules in config:
+
+```elixir
+# config/config.exs
+config :phoenix_kit_dashboards, widget_providers: [MyAppWeb.Widgets]
+```
+
+Each listed module exports the same `phoenix_kit_widgets/0` plain-map
+contract as above. A host widget without a `module_key` is always offered in
+the catalog; set one to gate it on that module's enablement and permission
+like any module widget. Call `PhoenixKitDashboards.Registry.refresh/0` after
+changing the config at runtime.
 
 ## Architecture
 

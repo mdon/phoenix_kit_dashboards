@@ -55,7 +55,7 @@ defmodule PhoenixKitDashboards.Widget do
   translated at render when a translation exists).
   """
 
-  alias PhoenixKitDashboards.Breakpoints
+  alias PhoenixKitDashboards.Lattice
 
   @enforce_keys [:key, :name, :component]
   defstruct key: nil,
@@ -64,11 +64,12 @@ defmodule PhoenixKitDashboards.Widget do
             icon: "hero-square-2-stack",
             module_key: nil,
             component: nil,
-            default_size: %{w: 4, h: 2},
-            min_size: %{w: 2, h: 1},
-            # Width cap = the largest breakpoint tier's columns (16, the TV row);
-            # each tier clamps placements to its own column count on top.
-            max_size: %{w: 16, h: 8},
+            # Sizes are in LATTICE units (25px nominal square cells).
+            default_size: %{w: 16, h: 8},
+            min_size: %{w: 8, h: 4},
+            # Width cap = the max per-layout lattice dimension (160); each
+            # layout clamps placements to its own dimensions on top.
+            max_size: %{w: 160, h: 160},
             settings_schema: [],
             # Optional named render variants (e.g. detailed vs simple vs color
             # grid). Empty = a single intrinsic view. The selected view key +
@@ -128,19 +129,27 @@ defmodule PhoenixKitDashboards.Widget do
   """
   @spec from_map(term(), source :: module()) :: {:ok, t()} | {:error, term()}
   def from_map(%{} = map, source) do
+    # The contract is "plain maps" — accept atom OR string keys throughout.
+    map = Map.new(map, fn {k, v} -> {to_atom_key(k), v} end)
+
     with {:ok, key} <- fetch(map, :key),
+         true <- is_binary(key) or is_atom(key) or {:error, {:invalid_key, key}},
          {:ok, name} <- fetch(map, :name),
+         true <- is_binary(name) or is_atom(name) or {:error, {:invalid_name, name}},
          {:ok, component} <- fetch(map, :component),
          true <- is_atom(component) || {:error, {:invalid_component, component}},
          true <- Code.ensure_loaded?(component) || {:error, {:component_not_loaded, component}},
          true <-
            module?(component, Phoenix.LiveComponent) ||
              {:error, {:not_a_live_component, component}} do
+      # Declared :max_size is deliberately IGNORED: on the screenful lattice
+      # the USER owns the box size and content self-fits, so a provider max
+      # cap serves nobody (it's a relic of the old auto-flow grid).
       {default_size, min_size, max_size} =
         sanitized_sizes(
-          normalize_size(map[:default_size], %{w: 4, h: 2}),
-          normalize_size(map[:min_size], %{w: 2, h: 1}),
-          normalize_size(map[:max_size], %{w: Breakpoints.max_cols(), h: 8})
+          normalize_size(map[:default_size], %{w: 16, h: 8}),
+          normalize_size(map[:min_size], %{w: 8, h: 4}),
+          %{w: Lattice.max_dim(), h: Lattice.max_dim()}
         )
 
       {:ok,
@@ -248,7 +257,10 @@ defmodule PhoenixKitDashboards.Widget do
         is_map(field),
         key = field[:key] || field["key"],
         key not in [nil, ""],
-        is_binary(key) or is_atom(key) do
+        is_binary(key) or is_atom(key),
+        # `]`/`[` in a form-field name breaks Phoenix param nesting (the value
+        # would come back as a nested map the widget can't read).
+        Regex.match?(~r/^[a-zA-Z0-9_.-]+$/, to_string(key)) do
       %{
         key: to_string(key),
         type: field_type(field[:type] || field["type"]),
@@ -276,19 +288,27 @@ defmodule PhoenixKitDashboards.Widget do
     end
   end
 
+  # Only WELL-KNOWN string keys convert (String.to_existing_atom would still
+  # let a provider grow the atom table with arbitrary map keys via except).
+  @known_keys ~w(key name description icon module_key component default_size min_size max_size
+                 settings_schema views refresh_interval category)
+  defp to_atom_key(k) when is_atom(k), do: k
+  defp to_atom_key(k) when is_binary(k) and k in @known_keys, do: String.to_atom(k)
+  defp to_atom_key(k), do: k
+
   defp normalize_size(%{w: w, h: h}, _default) when is_integer(w) and is_integer(h),
     do: %{w: w, h: h}
 
   defp normalize_size(_, default), do: default
 
-  # Keep the size bounds coherent — min <= default <= max, width within the
-  # LARGEST breakpoint tier's columns (16, the TV row; each tier clamps
-  # placements to its own count), every dimension >= 1 — so a malformed provider
-  # (e.g. `min_w > max_w`) can't make the resize hook's client-side limits
-  # disagree with what the server clamps to and renders.
+  # Keep the size bounds coherent — min <= default <= max, both dimensions
+  # within the lattice bound (160; each layout clamps placements to its own
+  # dimensions), every dimension >= 1 — so a malformed provider (e.g.
+  # `min_w > max_w`) can't make the resize hook's client-side limits disagree
+  # with what the server clamps to and renders.
   defp sanitized_sizes(default, min, max) do
-    cap = Breakpoints.max_cols()
-    row_cap = PhoenixKitDashboards.Grid.max_rows()
+    cap = Lattice.max_dim()
+    row_cap = Lattice.max_dim()
     min_w = clamp(min.w, 1, cap)
     max_w = clamp(max.w, min_w, cap)
     min_h = clamp(min.h, 1, row_cap)

@@ -2,9 +2,10 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
   @moduledoc """
   Manage page — lists the current user's personal dashboards, all shared
   (system) dashboards, and any `role`-scoped dashboards for the user's roles.
-  Admins can create a **personal**, **shared** (system), or **by-role** dashboard,
-  **clone** any visible dashboard into a private editable copy, open the builder,
-  or delete (own personal ones + shared/role ones).
+  Creating and editing metadata happens on the dedicated form page
+  (`DashboardFormLive`); from here admins open the builder, **clone** any
+  visible dashboard into a private editable copy, edit, or delete (own
+  personal ones + shared/role ones).
 
   Admin layout, sidebar, and the `@phoenix_kit_current_user` / `_scope` assigns
   are injected by PhoenixKit's on_mount hooks.
@@ -18,8 +19,7 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
       actor_uuid: 1,
       actor_opts: 1,
       user_role_uuids: 1,
-      scope_label: 1,
-      list_roles: 0
+      scope_label: 1
     ]
 
   alias PhoenixKitDashboards.Dashboards
@@ -31,46 +31,7 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
     {:ok,
      socket
      |> assign(:page_title, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboards"))
-     |> assign(:roles, list_roles())
-     |> assign(:show_create, false)
      |> load_dashboards()}
-  end
-
-  @impl true
-  def handle_event("open_create", _params, socket) do
-    {:noreply, assign(socket, :show_create, true)}
-  end
-
-  @impl true
-  def handle_event("close_create", _params, socket) do
-    {:noreply, assign(socket, :show_create, false)}
-  end
-
-  @impl true
-  def handle_event("create", %{"title" => title} = params, socket) do
-    # Type is fixed at creation ("grid" | "pixel"); it cannot be changed later.
-    type = if params["type"] == "pixel", do: "pixel", else: "grid"
-
-    attrs =
-      %{
-        title:
-          blank_to_default(title, Gettext.gettext(PhoenixKitWeb.Gettext, "Untitled Dashboard")),
-        config: %{"type" => type}
-      }
-      |> Map.merge(scope_attrs(params, socket))
-
-    case Dashboards.create(attrs, actor_opts(socket)) do
-      {:ok, dashboard} ->
-        {:noreply, push_navigate(socket, to: Paths.builder(dashboard.uuid))}
-
-      {:error, _changeset} ->
-        {:noreply,
-         put_flash(
-           socket,
-           :error,
-           Gettext.gettext(PhoenixKitWeb.Gettext, "Could not create dashboard.")
-         )}
-    end
   end
 
   @impl true
@@ -93,6 +54,9 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
   @impl true
   def handle_event("delete", %{"uuid" => uuid}, socket) do
     with %{} = dashboard <- Dashboards.get(uuid),
+         # Must be able to SEE it to delete it (mirrors clone) — so a crafted
+         # uuid can't blind-delete a role dashboard the actor isn't a member of.
+         true <- can_view?(dashboard, socket),
          true <- can_delete?(dashboard, socket),
          {:ok, _} <- Dashboards.delete(dashboard, actor_opts(socket)) do
       {:noreply,
@@ -123,21 +87,6 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
     |> assign(:dashboards, dashboards)
     |> assign(:current_user_uuid, actor_uuid(socket))
   end
-
-  # The scope + scope-specific attrs to create with, from the form params.
-  defp scope_attrs(%{"scope" => "system"}, _socket), do: %{scope: "system"}
-
-  defp scope_attrs(%{"scope" => "role", "role_uuid" => uuid}, _socket)
-       when is_binary(uuid) and uuid != "",
-       do: %{scope: "role", role_uuid: uuid}
-
-  defp scope_attrs(_params, socket),
-    do: %{scope: "personal", owner_user_uuid: actor_uuid(socket)}
-
-  # Role-scoped dashboards: a shared board for everyone holding a role — how an
-  # admin ships a ready-made dashboard to e.g. every developer (the "employee
-  # dashboard" persona). Offered whenever the host has roles to pick from.
-  defp offer_role_scope?(roles), do: roles != []
 
   # View: own personal · any shared/system · role dashboards for the user's roles.
   # Shared with the builder via the context so the two never disagree.
@@ -171,23 +120,18 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
     end
   end
 
-  defp blank_to_default(nil, default), do: default
-  defp blank_to_default("", default), do: default
-  defp blank_to_default(value, _default), do: value
-
   @impl true
   def render(assigns) do
     ~H"""
     <div class="flex flex-col mx-auto max-w-5xl px-4 py-6 gap-6">
-      <div class="flex items-center justify-between">
-        <h1 class="text-2xl font-semibold">{Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboards")}</h1>
-        <button type="button" phx-click="open_create" class="btn btn-primary btn-sm">
+      <%!-- No in-page <h1>: the admin header breadcrumb already shows the page
+      title (@page_title), so the page reclaims the space (workspace canon). --%>
+      <div class="flex items-center justify-end">
+        <.link navigate={Paths.new()} class="btn btn-primary btn-sm">
           <.icon name="hero-plus" class="w-4 h-4" />
           {Gettext.gettext(PhoenixKitWeb.Gettext, "Create dashboard")}
-        </button>
+        </.link>
       </div>
-
-      <.create_modal :if={@show_create} roles={@roles} />
 
       <.empty_state
         :if={@dashboards == []}
@@ -195,17 +139,22 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
         icon="hero-squares-2x2"
         title={Gettext.gettext(PhoenixKitWeb.Gettext, "No dashboards yet.")}
       >
-        <button type="button" phx-click="open_create" class="btn btn-primary btn-sm">
+        <.link navigate={Paths.new()} class="btn btn-primary btn-sm">
           <.icon name="hero-plus" class="w-4 h-4" />
           {Gettext.gettext(PhoenixKitWeb.Gettext, "Create your first dashboard")}
-        </button>
+        </.link>
       </.empty_state>
 
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div :for={dashboard <- @dashboards} class="card bg-base-100 shadow">
           <div class="card-body">
             <div class="flex items-start justify-between gap-2">
-              <h2 class="card-title text-base">{dashboard.title}</h2>
+              <.link
+                navigate={Paths.builder(dashboard.uuid)}
+                class="card-title text-base hover:text-primary transition-colors min-w-0 truncate"
+              >
+                {dashboard.title}
+              </.link>
               <span class={[
                 "badge badge-sm",
                 if(dashboard.scope == "system", do: "badge-info", else: "badge-ghost")
@@ -226,115 +175,47 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
                 )}
               </span>
             </p>
-            <div class="card-actions justify-end mt-2">
+            <%!-- Primary action stays a visible button; secondary actions live
+            in the canonical <.table_row_menu> kebab (staff/entities pattern). --%>
+            <div class="card-actions items-center justify-end mt-2">
               <.link navigate={Paths.builder(dashboard.uuid)} class="btn btn-outline btn-xs">
                 <.icon name="hero-pencil-square" class="w-3 h-3" />
                 {Gettext.gettext(PhoenixKitWeb.Gettext, "Open")}
               </.link>
-              <button
-                type="button"
-                phx-click="clone"
-                phx-value-uuid={dashboard.uuid}
-                phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Cloning…")}
-                class="btn btn-ghost btn-xs"
-                title={Gettext.gettext(PhoenixKitWeb.Gettext, "Make a personal copy")}
+              <.table_row_menu
+                id={"dashboard-menu-#{dashboard.uuid}"}
+                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Actions")}
               >
-                <.icon name="hero-document-duplicate" class="w-3 h-3" />
-                {Gettext.gettext(PhoenixKitWeb.Gettext, "Clone")}
-              </button>
-              <button
-                :if={deletable?(dashboard, @current_user_uuid)}
-                type="button"
-                phx-click="delete"
-                phx-value-uuid={dashboard.uuid}
-                data-confirm={Gettext.gettext(PhoenixKitWeb.Gettext, "Delete this dashboard?")}
-                phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Deleting…")}
-                class="btn btn-ghost btn-xs text-error"
-              >
-                <.icon name="hero-trash" class="w-3 h-3" />
-              </button>
+                <.table_row_menu_link
+                  :if={deletable?(dashboard, @current_user_uuid)}
+                  navigate={Paths.edit(dashboard.uuid)}
+                  icon="hero-pencil"
+                  label={Gettext.gettext(PhoenixKitWeb.Gettext, "Edit")}
+                />
+                <.table_row_menu_button
+                  phx-click="clone"
+                  phx-value-uuid={dashboard.uuid}
+                  phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Cloning…")}
+                  icon="hero-document-duplicate"
+                  label={Gettext.gettext(PhoenixKitWeb.Gettext, "Clone")}
+                />
+                <.table_row_menu_divider :if={deletable?(dashboard, @current_user_uuid)} />
+                <.table_row_menu_button
+                  :if={deletable?(dashboard, @current_user_uuid)}
+                  phx-click="delete"
+                  phx-value-uuid={dashboard.uuid}
+                  data-confirm={Gettext.gettext(PhoenixKitWeb.Gettext, "Delete this dashboard?")}
+                  phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Deleting…")}
+                  icon="hero-trash"
+                  label={Gettext.gettext(PhoenixKitWeb.Gettext, "Delete")}
+                  variant="error"
+                />
+              </.table_row_menu>
             </div>
           </div>
         </div>
       </div>
     </div>
-    """
-  end
-
-  # The "New dashboard" modal — title, layout type (fixed at creation), visibility.
-  attr(:roles, :list, required: true)
-
-  defp create_modal(assigns) do
-    ~H"""
-    <.modal show={true} on_close="close_create" id="dashboard-create-modal">
-      <:title>{Gettext.gettext(PhoenixKitWeb.Gettext, "New dashboard")}</:title>
-
-      <form phx-submit="create" class="flex flex-col gap-3">
-          <.input
-            type="text"
-            name="title"
-            value=""
-            label={Gettext.gettext(PhoenixKitWeb.Gettext, "Title")}
-            placeholder={Gettext.gettext(PhoenixKitWeb.Gettext, "New dashboard title")}
-            autofocus
-          />
-
-          <div>
-            <.select
-              name="type"
-              label={Gettext.gettext(PhoenixKitWeb.Gettext, "Layout type")}
-              value="grid"
-              options={[
-                {Gettext.gettext(PhoenixKitWeb.Gettext, "Grid (responsive)"), "grid"},
-                {Gettext.gettext(PhoenixKitWeb.Gettext, "Pixel (free canvas)"), "pixel"}
-              ]}
-            />
-            <p class="mt-1 text-xs text-base-content/50">
-              {Gettext.gettext(PhoenixKitWeb.Gettext, "Fixed once the dashboard is created.")}
-            </p>
-          </div>
-
-          <.select
-            name="scope"
-            label={Gettext.gettext(PhoenixKitWeb.Gettext, "Visibility")}
-            value="personal"
-            options={
-              [
-                {Gettext.gettext(PhoenixKitWeb.Gettext, "Personal"), "personal"},
-                {Gettext.gettext(PhoenixKitWeb.Gettext, "Shared"), "system"}
-              ] ++
-                if(offer_role_scope?(@roles),
-                  do: [{Gettext.gettext(PhoenixKitWeb.Gettext, "By role"), "role"}],
-                  else: []
-                )
-            }
-          />
-
-          <.select
-            :if={offer_role_scope?(@roles)}
-            name="role_uuid"
-            label={Gettext.gettext(PhoenixKitWeb.Gettext, "Role")}
-            value={nil}
-            options={Enum.map(@roles, &{&1.name, &1.uuid})}
-          />
-
-        <%!-- Buttons stay INSIDE the form (a submit in the modal's actions slot
-        would render outside it) --%>
-        <div class="modal-action">
-          <button type="button" phx-click="close_create" class="btn btn-ghost">
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "Cancel")}
-          </button>
-          <button
-            type="submit"
-            phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Creating…")}
-            class="btn btn-primary"
-          >
-            <.icon name="hero-plus" class="w-4 h-4" />
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "Create")}
-          </button>
-        </div>
-      </form>
-    </.modal>
     """
   end
 end

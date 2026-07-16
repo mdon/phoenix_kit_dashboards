@@ -16,6 +16,15 @@ defmodule PhoenixKitDashboards.Registry do
   contract proves load-bearing, it can later be promoted into the
   `PhoenixKit.Module` behaviour.)
 
+  The HOST app contributes widgets the same way without being a PhoenixKit
+  module: declare provider modules in config —
+
+      config :phoenix_kit_dashboards, widget_providers: [MyAppWeb.Widgets]
+
+  — each exporting `phoenix_kit_widgets/0` in the same plain-map contract. A
+  host widget without a `module_key` is always offered; set one to gate the
+  widget on that module's enablement + permission like any module widget.
+
   The result is memoized in `:persistent_term`, mirroring how core's
   `ModuleRegistry` caches tabs and permissions. Call `refresh/0` after modules
   are toggled to rebuild.
@@ -130,7 +139,7 @@ defmodule PhoenixKitDashboards.Registry do
         []
       end
 
-    [PhoenixKitDashboards | discovered]
+    ([PhoenixKitDashboards | discovered] ++ config_providers())
     |> Enum.uniq()
     |> Enum.filter(&function_exported?(&1, @provider_callback, 0))
   rescue
@@ -139,12 +148,30 @@ defmodule PhoenixKitDashboards.Registry do
       [PhoenixKitDashboards]
   end
 
+  # Host-app providers from config (see the moduledoc): plain modules, no
+  # PhoenixKit registration needed. ensure_loaded so function_exported?/3
+  # sees them even before their first call in dev; junk entries are dropped
+  # (the shared exported-callback filter catches modules without the contract).
+  defp config_providers do
+    :phoenix_kit_dashboards
+    |> Application.get_env(:widget_providers, [])
+    |> List.wrap()
+    |> Enum.filter(&(is_atom(&1) and Code.ensure_loaded?(&1)))
+  end
+
   defp safe_widgets(module) do
     List.wrap(apply(module, @provider_callback, []))
   rescue
     e ->
       Logger.warning(
         "[Dashboards] #{inspect(module)}.#{@provider_callback}/0 raised: #{Exception.message(e)}"
+      )
+
+      []
+  catch
+    kind, reason ->
+      Logger.warning(
+        "[Dashboards] #{inspect(module)}.#{@provider_callback}/0 #{kind}: #{inspect(reason)}"
       )
 
       []
@@ -162,6 +189,15 @@ defmodule PhoenixKitDashboards.Registry do
 
         []
     end
+  rescue
+    # One malformed provider entry (e.g. a non-stringable key) must be dropped,
+    # never abort the whole catalog build — that would take down every mount.
+    e ->
+      Logger.warning(
+        "[Dashboards] Dropping widget from #{inspect(source)} (normalize raised: #{Exception.message(e)})"
+      )
+
+      []
   end
 
   # ── Visibility ─────────────────────────────────────────────────────

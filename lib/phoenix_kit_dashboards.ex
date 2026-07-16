@@ -44,6 +44,10 @@ defmodule PhoenixKitDashboards do
 
   @module_key "dashboards"
 
+  # version/0 can't drift from mix.exs on a release (baked in at compile time —
+  # no Mix at runtime). Same pattern as phoenix_kit_projects.
+  @version Mix.Project.config()[:version]
+
   # ── Required callbacks ─────────────────────────────────────────────
 
   @impl PhoenixKit.Module
@@ -74,7 +78,7 @@ defmodule PhoenixKitDashboards do
   # ── Optional callbacks ─────────────────────────────────────────────
 
   @impl PhoenixKit.Module
-  def version, do: "0.1.0"
+  def version, do: @version
 
   @impl PhoenixKit.Module
   def permission_metadata do
@@ -101,14 +105,38 @@ defmodule PhoenixKitDashboards do
         group: :admin_modules,
         live_view: {PhoenixKitDashboards.Web.DashboardsLive, :index}
       },
-      # Hidden tab: the per-dashboard builder. Not shown in the sidebar; reached
-      # by navigating from the list. Dynamic :uuid segment is spliced verbatim
+      # Hidden tabs. Routes are generated in declaration order, so the static
+      # "dashboards/new" MUST come before the dynamic "dashboards/:uuid" or the
+      # builder route would swallow it.
+      %Tab{
+        id: :admin_dashboards_new,
+        label: "New Dashboard",
+        path: "dashboards/new",
+        priority: 651,
+        level: :admin,
+        permission: @module_key,
+        parent: :admin_dashboards,
+        visible: false,
+        live_view: {PhoenixKitDashboards.Web.DashboardFormLive, :new}
+      },
+      %Tab{
+        id: :admin_dashboards_edit,
+        label: "Dashboard Settings",
+        path: "dashboards/:uuid/edit",
+        priority: 652,
+        level: :admin,
+        permission: @module_key,
+        parent: :admin_dashboards,
+        visible: false,
+        live_view: {PhoenixKitDashboards.Web.DashboardFormLive, :edit}
+      },
+      # The per-dashboard builder. Dynamic :uuid segment is spliced verbatim
       # into the generated route.
       %Tab{
         id: :admin_dashboards_builder,
         label: "Dashboard Builder",
         path: "dashboards/:uuid",
-        priority: 651,
+        priority: 653,
         level: :admin,
         permission: @module_key,
         parent: :admin_dashboards,
@@ -123,7 +151,7 @@ defmodule PhoenixKitDashboards do
 
   # The grid is server-rendered; the module hooks in this bundle are progressive
   # enhancement on top (DashboardGridDrag / DashboardCatalogDrag / DashboardResize /
-  # DashboardFreeDrag / the fit + breakpoint + fullscreen helpers — see the
+  # DashboardFreeDrag / the fit + fullscreen helpers — see the
   # bundle header and AGENTS.md "The grid"). No `@impl` — older core releases don't declare the
   # `js_sources/0` callback.
   def js_sources do

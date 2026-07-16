@@ -22,7 +22,7 @@ defmodule PhoenixKitDashboardsTest do
     test "core identity callbacks" do
       assert PhoenixKitDashboards.module_key() == "dashboards"
       assert PhoenixKitDashboards.module_name() == "Dashboards"
-      assert PhoenixKitDashboards.version() == "0.1.0"
+      assert PhoenixKitDashboards.version() == Mix.Project.config()[:version]
     end
 
     test "permission metadata key matches module key" do
@@ -69,6 +69,88 @@ defmodule PhoenixKitDashboardsTest do
       assert Enum.all?(built_in, &is_nil(&1.module_key))
       visible = Registry.list_for_scope(:some_scope)
       assert Enum.all?(built_in, fn w -> w.key in Enum.map(visible, & &1.key) end)
+    end
+  end
+
+  describe "host-app widget providers (config :phoenix_kit_dashboards, :widget_providers)" do
+    defmodule HostComponent do
+      use Phoenix.LiveComponent
+      def render(assigns), do: ~H""
+    end
+
+    defmodule HostWidgets do
+      def phoenix_kit_widgets do
+        [
+          %{
+            key: "host.custom",
+            name: "Host custom",
+            component: PhoenixKitDashboardsTest.HostComponent,
+            category: "Host"
+          }
+        ]
+      end
+    end
+
+    defmodule NotAProvider do
+    end
+
+    defmodule RaisingProvider do
+      def phoenix_kit_widgets, do: raise("boom")
+    end
+
+    defmodule MalformedProvider do
+      # A widget with a non-stringable key must be dropped, not abort the build.
+      def phoenix_kit_widgets do
+        [%{key: %{}, name: "Bad", component: PhoenixKitDashboards.Widgets.NoteWidget}]
+      end
+    end
+
+    setup do
+      on_exit(fn ->
+        Application.delete_env(:phoenix_kit_dashboards, :widget_providers)
+        Registry.refresh()
+      end)
+    end
+
+    test "a config-declared provider's widgets join the catalog" do
+      Application.put_env(:phoenix_kit_dashboards, :widget_providers, [HostWidgets])
+      Registry.refresh()
+
+      assert %Widget{name: "Host custom", source: HostWidgets} = Registry.get("host.custom")
+      # No module_key -> always offered, like the built-ins.
+      assert "host.custom" in Enum.map(Registry.list_for_scope(:any_scope), & &1.key)
+    end
+
+    test "junk provider entries are ignored, valid ones still load" do
+      Application.put_env(:phoenix_kit_dashboards, :widget_providers, [
+        NotAProvider,
+        "not a module",
+        NoSuch.Module,
+        HostWidgets
+      ])
+
+      Registry.refresh()
+      assert Registry.get("host.custom")
+    end
+
+    test "a raising or malformed provider is isolated — built-ins + valid providers survive" do
+      Application.put_env(:phoenix_kit_dashboards, :widget_providers, [
+        RaisingProvider,
+        MalformedProvider,
+        HostWidgets
+      ])
+
+      ExUnit.CaptureLog.capture_log(fn -> Registry.refresh() end)
+
+      # The bad providers didn't take down the catalog.
+      assert Registry.get("host.custom")
+      assert Registry.get("core.note")
+    end
+
+    test "without the config the catalog is unchanged" do
+      Application.delete_env(:phoenix_kit_dashboards, :widget_providers)
+      Registry.refresh()
+      refute Registry.get("host.custom")
     end
   end
 
@@ -132,6 +214,36 @@ defmodule PhoenixKitDashboardsTest do
                Widget.from_map(%{key: "x.y", name: "Y"}, :prov)
     end
 
+    test "accepts a string-keyed provider map (the documented plain-map contract)" do
+      assert {:ok, %Widget{key: "x.y", name: "Y"}} =
+               Widget.from_map(
+                 %{"key" => "x.y", "name" => "Y", "component" => DummyComponent},
+                 :prov
+               )
+    end
+
+    test "drops a settings-schema field whose key would break form nesting" do
+      {:ok, widget} =
+        Widget.from_map(
+          %{
+            key: "x.y",
+            name: "Y",
+            component: DummyComponent,
+            settings_schema: [
+              %{key: "good", type: :string},
+              %{key: "bad]name[x", type: :string},
+              %{key: "also-good_1.2", type: :string}
+            ]
+          },
+          :prov
+        )
+
+      keys = Enum.map(widget.settings_schema, & &1.key)
+      assert "good" in keys
+      assert "also-good_1.2" in keys
+      refute "bad]name[x" in keys
+    end
+
     test "default_settings derives from schema" do
       {:ok, widget} =
         Widget.from_map(
@@ -192,9 +304,10 @@ defmodule PhoenixKitDashboardsTest do
           :prov
         )
 
-      # Per-view min honoured; oversize clamps to the widget max; junk dropped.
+      # Per-view min honoured; oversize clamps to the lattice bound (declared
+      # max_size is ignored on the screenful lattice); junk dropped.
       assert Widget.min_size_for(widget, "big") == %{w: 4, h: 3}
-      assert Widget.min_size_for(widget, "huge") == %{w: 8, h: 4}
+      assert Widget.min_size_for(widget, "huge") == %{w: 99, h: 99}
       # Views without (or with malformed) min fall back to the widget's min.
       assert Widget.min_size_for(widget, "text") == %{w: 2, h: 1}
       assert Widget.min_size_for(widget, "junk") == %{w: 2, h: 1}
@@ -274,42 +387,50 @@ defmodule PhoenixKitDashboardsTest do
                widget.settings_schema
     end
 
-    test "sanitizes incoherent size bounds (min <= default <= max, width within the widest tier)" do
+    test "sanitizes incoherent size bounds (min <= default <= max, within the lattice cap)" do
       {:ok, widget} =
         Widget.from_map(
           %{
             key: "x",
             name: "Y",
             component: DummyComponent,
-            min_size: %{w: 20, h: 0},
-            max_size: %{w: 24, h: 3},
-            default_size: %{w: 1, h: 99}
+            min_size: %{w: 170, h: 0},
+            max_size: %{w: 300, h: 12},
+            default_size: %{w: 1, h: 999}
           },
           :prov
         )
 
-      # min_w clamped into [1, max_cols], max_w >= min_w and <= max_cols (16 —
-      # the TV tier), min_h >= 1, default clamped into [min, max] per dimension.
-      cap = PhoenixKitDashboards.Breakpoints.max_cols()
+      # min_w clamped into [1, max_dim]; the max is ALWAYS the lattice bound
+      # (declared max_size ignored); default clamped into [min, max].
+      cap = PhoenixKitDashboards.Lattice.max_dim()
       assert widget.min_size == %{w: cap, h: 1}
-      assert widget.max_size == %{w: cap, h: 3}
-      assert widget.default_size == %{w: cap, h: 3}
+      assert widget.max_size == %{w: cap, h: cap}
+      assert widget.default_size == %{w: cap, h: cap}
     end
 
-    test "the width cap is the LARGEST tier's columns, so a widget can span a full TV row" do
-      assert PhoenixKitDashboards.Breakpoints.max_cols() == 16
+    test "every widget can span the full lattice — declared max_size is ignored" do
+      assert PhoenixKitDashboards.Lattice.max_dim() == 160
 
+      # Providers still shipping old-unit declarations (max 6x2 meant half a
+      # 12-col screen) must not cap lattice resizes at nonsense.
       {:ok, widget} =
         Widget.from_map(
-          %{key: "x", name: "Y", component: DummyComponent, max_size: %{w: 16, h: 4}},
+          %{key: "x", name: "Y", component: DummyComponent, max_size: %{w: 6, h: 2}},
           :prov
         )
 
-      assert widget.max_size.w == 16
+      assert widget.max_size == %{w: 160, h: 160}
 
-      # A provider that declares no max at all gets the full-TV-row default.
       {:ok, unbounded} = Widget.from_map(%{key: "x", name: "Y", component: DummyComponent}, :prov)
-      assert unbounded.max_size.w == 16
+      assert unbounded.max_size.w == 160
+    end
+
+    test "design dims derive from the lattice's 25px square cell" do
+      assert PhoenixKitDashboards.Lattice.cell() == 25
+      assert PhoenixKitDashboards.Lattice.design_width(64) == 1600
+      assert PhoenixKitDashboards.Lattice.design_height(36) == 900
+      assert PhoenixKitDashboards.Lattice.design_width(160) == 4000
     end
   end
 

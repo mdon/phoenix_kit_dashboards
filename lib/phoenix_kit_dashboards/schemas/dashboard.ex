@@ -14,16 +14,16 @@ defmodule PhoenixKitDashboards.Schemas.Dashboard do
         "view"       => "detailed",                # selected render variant, or nil
         "settings"   => %{ ... },                  # per-instance customizations
         "pixel"      => %{"fx" => .., "fy" => .., "fw" => .., "fh" => ..},  # pixel canvas (px)
-        "bp"         => %{"desktop" => %{"w" => 6, "h" => 2, "hidden" => false, "pos" => 0}, ...}
-      }                                            # grid: per-breakpoint span/order/visibility
+        "bp"         => %{"l1" => %{"x" => 0, "y" => 0, "w" => 16, "h" => 8, "hidden" => false, "pos" => 0}, ...}
+      }                                            # grid: per-LAYOUT cells/span/visibility
 
-  Grid dashboards place each widget at explicit cells per breakpoint tier —
-  `%{x, y, w, h, hidden, pos}` under `"bp"` (TV 16 / Desktop 12 / iPad 8 /
-  Phone 4 columns; see `PhoenixKitDashboards.Breakpoints`). Pixel dashboards
-  use `pixel` (absolute px + z-order). The `config` JSONB column holds
-  dashboard-level state: `"type"` (`"grid"` | `"pixel"`, fixed at creation),
-  `"home_bp"`, and per-breakpoint `"breakpoints"` metadata
-  (`%{bp => %{"state" => "custom"}}`).
+  Grid dashboards place each widget at explicit lattice cells per named
+  layout — `%{x, y, w, h, hidden, pos}` under `"bp"`, keyed by the layout id
+  (see `PhoenixKitDashboards.Lattice` for the 25px screenful lattice). Pixel
+  dashboards use `pixel` (absolute px + z-order). The `config` JSONB column
+  holds dashboard-level state: `"type"` (`"grid"` | `"pixel"`, fixed at
+  creation) and the ordered `"layouts"` list
+  (`[%{"id", "name", "cols", "rows"}]`).
 
   ## Scope
 
@@ -40,9 +40,8 @@ defmodule PhoenixKitDashboards.Schemas.Dashboard do
   @foreign_key_type :binary_id
 
   @scopes ~w(personal system role)
-  @layout_modes ~w(grid free)
 
-  # A dashboard's TYPE is fixed at creation: "grid" (responsive breakpoints) or
+  # A dashboard's TYPE is fixed at creation: "grid" (screenful lattice) or
   # "pixel" (a free-placement canvas). Replaces the old per-dashboard "mode"
   # toggle; legacy `config["mode"]` ("grid"/"free") maps to it.
   @types ~w(pixel grid)
@@ -70,8 +69,8 @@ defmodule PhoenixKitDashboards.Schemas.Dashboard do
     field(:role_uuid, :binary_id)
     field(:scope, :string, default: "personal")
     field(:layout, {:array, :map}, default: [])
-    # Dashboard-level config (JSONB): "type" ("grid"|"pixel"), per-bp "breakpoints"
-    # metadata,.
+    # Dashboard-level config (JSONB): "type" ("grid"|"pixel") + the named
+    # "layouts" list.
     field(:config, :map, default: %{})
     field(:is_default, :boolean, default: false)
     field(:position, :integer, default: 0)
@@ -115,12 +114,8 @@ defmodule PhoenixKitDashboards.Schemas.Dashboard do
     change(dashboard, config: config)
   end
 
-  @doc "List of valid layout-mode strings."
-  @spec layout_modes() :: [String.t()]
-  def layout_modes, do: @layout_modes
-
   @doc """
-  The dashboard's fixed **type** — `"grid"` (responsive breakpoints) or `"pixel"`
+  The dashboard's fixed **type** — `"grid"` (screenful lattice) or `"pixel"`
   (free canvas). Reads `config["type"]`, falling back to the legacy
   `config["mode"]` (`"free"` → `"pixel"`), defaulting to `"grid"`.
   """

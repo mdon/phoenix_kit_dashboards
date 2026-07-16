@@ -59,21 +59,30 @@ defmodule PhoenixKitDashboards.GridTest do
   end
 
   describe "fit_size/8" do
+    test "the grid edge caps even the type minimum (min_override corner)" do
+      # A widget parked at the bottom edge via min_override: growing back to
+      # its type min (8x4 here) must stop at the screenful edge, never spill
+      # past it. Same at the right edge for width.
+      bounds = {%{w: 8, h: 4}, %{w: 160, h: 160}}
+      assert {8, 1} = Grid.fit_size(0, 9, 8, 4, 1, [], {10, 10}, bounds)
+      assert {1, 4} = Grid.fit_size(9, 0, 8, 4, 4, [], {10, 10}, bounds)
+    end
+
     @bounds {%{w: 1, h: 1}, %{w: 16, h: 8}}
 
     test "grows freely with no neighbours, clamped to grid edge and bounds" do
-      assert {8, 5} = Grid.fit_size(2, 0, 8, 5, 2, [], 12, @bounds)
+      assert {8, 5} = Grid.fit_size(2, 0, 8, 5, 2, [], {12, 160}, @bounds)
       # Width past the right edge stops at it (cols - x).
-      assert {10, 5} = Grid.fit_size(2, 0, 99, 5, 2, [], 12, @bounds)
+      assert {10, 5} = Grid.fit_size(2, 0, 99, 5, 2, [], {12, 160}, @bounds)
     end
 
     test "grows until blocked by a neighbour instead of overlapping" do
       # Neighbour at x=6 on the same rows: width stops at 6 - 0.
       others = [p(6, 0, 4, 4)]
-      assert {6, 2} = Grid.fit_size(0, 0, 10, 2, 2, others, 12, @bounds)
+      assert {6, 2} = Grid.fit_size(0, 0, 10, 2, 2, others, {12, 160}, @bounds)
       # Neighbour below at y=3: height stops at 3.
       others = [p(0, 3, 4, 2)]
-      assert {4, 3} = Grid.fit_size(0, 0, 4, 6, 2, others, 12, @bounds)
+      assert {4, 3} = Grid.fit_size(0, 0, 4, 6, 2, others, {12, 160}, @bounds)
     end
   end
 end

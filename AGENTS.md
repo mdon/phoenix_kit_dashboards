@@ -73,7 +73,7 @@ Two core ideas:
 
 The builder grid is **server-rendered HEEx + a CSS grid** — each widget is anchored
 at its placement's explicit cells (`grid-column/-row: <x+1> / span <w>`) on the
-active breakpoint's column grid. It renders and is readable **without any
+active layout's lattice. It renders and is readable **without any
 JavaScript**, and every mutation (add / remove / move / resize) re-renders
 normally — there is **no** `phx-update="ignore"` and no client-owned DOM.
 
@@ -91,11 +91,8 @@ the fit scale), and the preview only ever moves through FREE cells (occupancy fr
 the other cards' data attrs), so the shown spot is always legal and **the drop
 always matches the preview**. On drop it pushes `move_widget_grid %{id, x, y}`
 (0-based cells; `Dashboards.place_widget_grid/5` clamps + collision-rejects
-server-side). Tier detection: hosts SHOULD pass `viewport_width` in the
-LiveSocket connect params (README) so the builder mounts straight into the
-right tier (`Breakpoints.for_width/1`, `screen_known?`); without it the
-`DashboardBreakpoint` hook round-trip detects it behind a loading state, with
-a 4s reveal-at-default fallback for broken assets (no-JS reveals instantly via
+server-side). There is **no viewport/tier detection** — a dashboard opens
+instantly on its first layout (no loading state; no-JS reveals via
 `<noscript>`). **Catalog drag-out** (`DashboardCatalogDrag` on `#dashboard-catalog`,
 entries carry `data-widget-key/-w/-h`): drag an entry past a ~6px threshold and a
 ghost + a free-cells-only dashed footprint follow the pointer; dropping pushes
@@ -115,8 +112,9 @@ The module hooks ship via `js_sources/0` (`priv/static/assets/phoenix_kit_dashbo
 `DashboardGridDrag` (above), `DashboardFreeDrag` (free canvas — drag a
 `.pk-free-handle` grip, moves the card via `left/top` and pushes
 `move_widget_to %{id, fx, fy}` in exact px), `DashboardResize` (corner resize, both
-modes; see above), plus the fit/fullscreen/tier helpers (`DashboardGridFit`,
-`DashboardFreeFit`, `DashboardFullscreen`, `DashboardBreakpoint`). All are
+modes; see above), plus the fit/fullscreen helpers (`DashboardGridFit`,
+`DashboardFreeFit`, `DashboardFullscreen`, `DashboardFitScreen` — the Layout
+bar's "Fit screen" button, reporting the real `window.screen` px). All are
 enhancement only — the non-hook fallbacks are the server-driven modal inputs.
 The drag/resize hooks leave the card exactly where dropped and update the
 style in the server's format, so the re-render confirms identically with **no
@@ -139,58 +137,50 @@ atomic — a widget item is `%{id, widget_key, settings, view, "pixel" => %{fx,f
 and fall back to the legacy flat shape (`pos` is the legacy-order tiebreaker; items
 without stored `x`/`y` are packed at render and pinned on their first edit).
 
-- **`"grid"` — responsive breakpoints with EXPLICIT CELL PLACEMENT.** Tiers
-  (`PhoenixKitDashboards.Breakpoints`, largest→smallest): **TV ≥1920 = 16 cols,
-  Desktop ≥1280 = 12, iPad ≥768 = 8, Phone <768 = 4**, each with a `preview_width`.
-  A placement is `%{x, y, w, h, hidden}` — `x`/`y` are 0-based cells; a widget goes
-  ANYWHERE (gaps allowed, that's the point), widgets never overlap
-  (`PhoenixKitDashboards.Grid` owns the occupancy/packing/fit math). Each tier has
-  its own **designable surface** (`Breakpoints.max_rows/1`: TV 8, desktop 15,
-  iPad 24, phone 36 — the builder renders + scrolls ALL of it so a widget can be
-  placed on any row up front; `Grid.max_rows/0` = 50 is only the hard bound that
-  derived-tier packing may overflow into, and overflowing content still renders).
-  Each breakpoint has its own layout: edits
-  (move/resize/hide) act on the **active** breakpoint and flip it to customized —
-  `materialize_grid` first pins every widget's resolved cells so editing one can't
-  shift the rest (and `save_customized` must FORCE the layout write: the struct was
-  pre-mutated in memory, so a plain Ecto `change/2` would diff against it and
-  silently skip persisting when the edit equals the derived values). Placements
-  that predate explicit cells (order-only `pos` data) pack first-fit around the
-  placed ones at render, no migration. An un-customized breakpoint is
-  **auto-derived** from the nearest customized one **in either direction** by
-  **reflow + compact** (its widgets in reading order, spans clamped to the target
-  columns, packed first-fit). A dashboard has a **home tier** (`home_bp/1` =
-  `config["home_bp"]`, set from the creator's screen on first open via
-  `put_home_bp/2`; defaults desktop). The home tier is always a **designed** view
-  (`customized?/2` = state custom **or** the home) and is the seed (`add_widget`
-  seeds `bp[home]` at the first free cell) + derivation anchor; it can't be reset.
-  `Dashboards.resolve_items/3` is the single render path — every placement it
-  returns carries explicit cells (`visible: true` filters hidden; hidden widgets
-  keep occupying their cells).
-
-  **Always fit-scaled + editable.** The grid is laid out at its tier's design width
-  and scaled to the available space by **`DashboardGridFit`** (shrink-to-fit for a
-  DIFFERENT tier's preview; **fills** — scaling past 1:1 — on the viewer's NATIVE
-  tier, `data-fill`, and in fullscreen). It's
-  **editable at any scale**: corner-resize via the scale-aware `DashboardResize`;
-  cell placement by dragging via the module's `DashboardGridDrag` (screen-space
-  metrics, so it's transform-aware at any scale) or the Settings modal's
-  Column/Row inputs. So an employee on a phone can fix the *TV* layout: tap
-  TV, and edit it shrunk-to-fit. **On open** (the
-  **`DashboardBreakpoint`** hook reports the screen tier once, `detect_bp`) we only
-  ever show a *designed* view (`display_bp/2` = the screen tier if designed, else the
-  nearest designed one) — never a freshly-derived one; hosts passing
-  `viewport_width` in the LiveSocket connect params (README) skip the hook
-  round-trip entirely and mount straight into the right tier. `scaled?` (view ≠
-  the viewer's own size) drives the banner. The **catalog** is a slide-over panel
-  in BOTH modes: always rendered but hidden, toggled client-side (`JS.toggle`, so
-  opening is instant), entries grouped by providing module, and it hides itself
-  while a catalog drag is off-panel so cells under it can take the drop
-  (releasing over the visible panel cancels). The **full-screen** button lives in
-  the title row for both modes (`DashboardFullscreen` → requests fullscreen on
-  the fit container; a `fullscreenchange` re-fits to fill). The whole grid pane
-  is held hidden (a spinner + "fitting…" text; `<noscript>` reveal) until the
-  tier resolves, so the switcher never animates desktop→tv.
+- **`"grid"` — the SCREENFUL LATTICE.** A grid dashboard is an ordered list
+  of named layouts in `config["layouts"]`
+  (`[%{"id","name","cols","rows"}]`, `Dashboards.layouts/1`; default
+  `Layout 1` at 64×36 = 16:9); the builder shows them as a tab strip
+  (`[Layout 1] [Wall TV] [+]` + an actions dropdown with Rename/Delete on
+  the active tab). "+" instant-creates "Layout N" copying the active
+  layout's dims + placements (doubles as duplicate) and drops into inline
+  rename. The last layout can't be deleted; deleting one strips its
+  per-widget placements (widgets are dashboard-level and live on elsewhere).
+  Each layout is `cols × rows` on a **gapless 25px nominal SQUARE cell
+  lattice** (`PhoenixKitDashboards.Lattice`: cell 25, dims 4..160, stretch
+  tolerance 1.04) representing **exactly ONE SCREENFUL — nothing scrolls,
+  ever**. `DashboardGridFit` sizes the canvas
+  NATIVELY (no transform — text/SVG render crisp and undistorted): per-axis
+  fill when both scales stay within ~4% of 1 and of each other (a fitted
+  screen fills exactly; only the cell rectangles go non-square), else the
+  intact **artboard** (`bg-base-100 shadow-xl ring-1`, mono caption
+  `Layout 1 · 64×36` hidden when no room below) shrinks into a smaller
+  pane or floats centered at NATURAL size in a bigger one — standard
+  cells, never blown up. The
+  Layout bar has numeric Grid `cols × rows` inputs (`set_dims`) and a
+  **Fit screen** button (`DashboardFitScreen` pushes real screen px;
+  server rounds px/25). `set_grid_dims/4` NEVER refuses: it clamps to
+  Lattice bounds and raises to the occupied extent (shrinking can't crop
+  widgets). Widget spans are lattice units (note 16×8 default, min 8×4;
+  visual gap = the card's own `m-[2px]`, folded into the resize hook's gap
+  term; drag/resize hooks are per-axis-zoom aware). **Widget content
+  self-fits** via container queries (`[container-type:size]` +
+  `cqmin`/`cqh` type) — the view (detailed/dense/…) is user-chosen (hover
+  toolbar cycle button, `cycle_view`) and honored verbatim at ANY size —
+  never silently switched. On the grid the view is PER LAYOUT (stored on
+  that layout's placement as `"view"`, `Layout.view/2` resolves override →
+  instance default; `set_layout_view/4` writes it) — designing the phone
+  layout means choosing how widgets look ON the phone. The pixel canvas
+  has no layouts, so there the view stays instance-level; list widgets take an "items: N" slot budget
+  (body divides into N fixed slots + a "+N more" line; see
+  `ModuleStatsWidget` for the worked pattern). Widgets never overlap; a
+  widget without a stored placement in a layout packs first-fit at render
+  (its TYPE default span) and pins on first edit. NO legacy/tier
+  compatibility — pre-lattice configs just get the fresh default layout. A
+  session-local **Show-grid toggle** paints a dot lattice as a CSS
+  background (`radial-gradient` at 25px pitch — zero extra DOM; per-cell
+  divs would be thousands of nodes) even on an EMPTY board (hint floats
+  over it).
 - **`"pixel"` — an absolute pixel canvas**: drag/resize anywhere, exact px in
   `pixel.fx/fy/fw/fh`, no snapping. Widgets may **overlap deliberately** — each
   widget bar has bring-to-front / send-to-back (`restack_widget_px/3`, a `"z"`
@@ -219,8 +209,13 @@ Column/Row inputs; pixel: modal size + X/Y px inputs).
   (15–30 s) use it. Widgets never subscribe themselves (LiveComponents have no
   process); the host drives refresh.
 - **Scopes + sharing**: dashboards are `personal` / `system` (shared) / `role`.
-  The manage page (`DashboardsLive`) authors all three (role picker from core
-  `Roles.list_roles/0`), **clones** any visible dashboard into a private copy, and
+  **Role-scope creation is HIDDEN in the UI for now** (boss call 2026-07-14 —
+  it was briefly offered in the old create modal): the form page authors
+  personal/system only; the backend keeps full role support (`list_for_user/2`
+  role visibility, handler path), and an already-role-scoped dashboard is
+  grandfathered on its edit page (role picker from core `Roles.list_roles/0`)
+  so a save can't silently convert it. The manage page **clones** any visible
+  dashboard into a private copy, and
   gates delete/visibility via `can_view?`/`can_delete?`; `list_for_user/2` takes
   the user's role uuids so role dashboards surface for their members.
 
@@ -245,9 +240,9 @@ system / role scopes, JSONB `layout`, `owner_user_uuid` FK → `phoenix_kit_user
 `ON DELETE CASCADE`) ships as core migration **V133** (first released in core
 `1.7.145`).
 
-The per-dashboard JSONB **`config`** column (type + home tier + customized set) ships as core
+The per-dashboard JSONB **`config`** column (type + named layouts) ships as core
 migration **V139**, released in core **`1.7.179`**. The config-dependent features
-(type, home tier, customized tiers) need that column, so the `mix.exs` core pin
+(type, named layouts) need that column, so the `mix.exs` core pin
 floor is `~> 1.7.179` — a core older than that would resolve an older pin yet lack
 the column the layout engine reads. Cross-repo work can still run against
 **local core** (`PHOENIX_KIT_PATH=../phoenix_kit`), where `ensure_current` builds

@@ -3,7 +3,7 @@ defmodule PhoenixKitDashboards.Grid do
   Pure cell-placement math for **grid** dashboards.
 
   A grid widget occupies an explicit rectangle of cells — `x` (column, 0-based),
-  `y` (row, 0-based), spanning `w`×`h` — on a breakpoint's column grid. Widgets
+  `y` (row, 0-based), spanning `w`×`h` — on a layout's lattice. Widgets
   can sit anywhere (gaps are allowed, that's the point of the grid type) but
   never overlap; these helpers are the single source of truth for what fits
   where, shared by every placement mutation and by the render-time resolution
@@ -20,13 +20,10 @@ defmodule PhoenixKitDashboards.Grid do
   (`%{"x" => _, "y" => _, "w" => _, "h" => _}`) — no DOM, no DB.
   """
 
-  # The HARD row bound: placement scans and derived-tier packing never go past
-  # it, and hostile coordinates clamp to it. The per-TIER designable surface
-  # (what the builder renders and lets you place on manually) is smaller —
-  # `Breakpoints.max_rows/1` (TV 8 … phone 36); derived packing may overflow a
-  # tier's surface into this headroom when denser content reflows into fewer
-  # columns.
-  @max_rows 50
+  # The HARD row bound: placement scans never go past it and hostile
+  # coordinates clamp to it. Matches the lattice dimension cap (a layout's
+  # rows are 4..160).
+  @max_rows 160
 
   @doc "The maximum row index + span extent a placement may reach."
   @spec max_rows() :: pos_integer()
@@ -92,8 +89,7 @@ defmodule PhoenixKitDashboards.Grid do
   a `cols`-wide grid: each gets the first free rectangle in reading order, spans
   clamped to the column count. Returns the placements with `"x"`/`"y"` set.
 
-  This is the "reflow + compact" primitive: it materializes legacy order-only
-  layouts and derives un-customized breakpoints from a designed tier (sorted to
+  This is the "reflow + compact" primitive behind widget reorder (sorted to
   reading order first by the caller).
   """
   @spec compact([map()], pos_integer()) :: [map()]
@@ -119,7 +115,9 @@ defmodule PhoenixKitDashboards.Grid do
   `orig_h`), then height at the fitted width; the result never collides because
   the original placement doesn't.
 
-  `bounds` are the widget type's `{min, max}` size maps.
+  `bounds` are the widget type's `{min, max}` size maps; `rows` is the
+  layout's own row count — a widget can never resize past the screenful's
+  bottom edge.
   """
   @spec fit_size(
           integer(),
@@ -128,17 +126,21 @@ defmodule PhoenixKitDashboards.Grid do
           integer(),
           pos_integer(),
           [map()],
-          pos_integer(),
+          {pos_integer(), pos_integer()},
           {%{w: pos_integer(), h: pos_integer()}, %{w: pos_integer(), h: pos_integer()}}
         ) :: {pos_integer(), pos_integer()}
-  def fit_size(x, y, req_w, req_h, orig_h, others, cols, {min_size, max_size}) do
-    min_w = min(min_size.w, cols)
-    req_w = req_w |> max(min_w) |> min(min(max_size.w, cols - x))
-    req_h = req_h |> max(min_size.h) |> min(min(max_size.h, @max_rows - y))
+  def fit_size(x, y, req_w, req_h, orig_h, others, {cols, rows}, {min_size, max_size}) do
+    # The grid edge caps even the type minimum: a widget parked against the
+    # edge (min_override) must never grow past the screenful, so the fitting
+    # floor is the available space when that's smaller than the min.
+    floor_w = min(min(min_size.w, cols), max(cols - x, 1))
+    floor_h = min(min_size.h, max(rows - y, 1))
+    req_w = req_w |> max(floor_w) |> min(min(max_size.w, cols - x))
+    req_h = req_h |> max(floor_h) |> min(min(max_size.h, rows - y))
 
     probe_h = min(orig_h, req_h)
-    w = largest_fitting(req_w, min_w, fn w -> not collides?(x, y, w, probe_h, others) end)
-    h = largest_fitting(req_h, min_size.h, fn h -> not collides?(x, y, w, h, others) end)
+    w = largest_fitting(req_w, floor_w, fn w -> not collides?(x, y, w, probe_h, others) end)
+    h = largest_fitting(req_h, floor_h, fn h -> not collides?(x, y, w, h, others) end)
     {w, h}
   end
 

@@ -9,8 +9,8 @@
 //   DashboardGridDrag  — grid cell placement (drag a widget to any free cell)
 //   DashboardFreeDrag  — pixel-canvas move (left/top px)
 //   DashboardResize    — corner resize (cells in grid, px in pixel mode)
-//   DashboardGridFit / DashboardFreeFit / DashboardFullscreen / DashboardBreakpoint
-//                      — fit-scaling, fullscreen and tier detection helpers
+//   DashboardGridFit / DashboardFreeFit / DashboardFullscreen
+//                      — fit-scaling and fullscreen helpers
 window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
 (function () {
@@ -101,7 +101,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       this.card = card;
       this.pointerId = e.pointerId;
       // Screen px per CSS px (the fit-scale transform on the canvas; 1 otherwise).
-      this.zoom = card.offsetWidth ? rect.width / card.offsetWidth : 1;
+      this.zoomX = card.offsetWidth ? rect.width / card.offsetWidth : 1;
+      this.zoomY = card.offsetHeight ? rect.height / card.offsetHeight : 1;
       // The card is absolutely positioned inside the canvas; offsetLeft/Top ARE
       // its fx/fy. Drag updates left/top directly — pixel-precise, never snapped.
       this.startLeft = card.offsetLeft;
@@ -130,6 +131,9 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
       this._onMove = function (ev) {
         if (ev.pointerId !== self.pointerId) return;
+        // A mouse released OUTSIDE the window never delivers pointerup — the
+        // next move arrives with no buttons pressed: treat it as a cancel.
+        if (ev.pointerType === "mouse" && ev.buttons === 0) return self.cancelDrag();
         self.applyMove(ev);
         self.edge.update(ev);
       };
@@ -157,8 +161,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var sx = this.pane ? this.pane.scrollLeft - this.startScrollLeft : 0;
       var sy = this.pane ? this.pane.scrollTop - this.startScrollTop : 0;
       return {
-        dx: (ev.clientX - this.startClientX + sx) / this.zoom,
-        dy: (ev.clientY - this.startClientY + sy) / this.zoom
+        dx: (ev.clientX - this.startClientX + sx) / this.zoomX,
+        dy: (ev.clientY - this.startClientY + sy) / this.zoomY
       };
     },
 
@@ -333,8 +337,10 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var pst = parent ? getComputedStyle(parent) : {};
 
       this.free = card.getAttribute("data-free") === "true";
-      // Screen px per CSS px (accounts for free mode's `zoom`; 1 in grid mode).
-      this.zoom = card.offsetWidth ? rect.width / card.offsetWidth : 1;
+      // Screen px per CSS px, PER AXIS (the screenful fit may stretch the
+      // axes slightly differently within its tolerance).
+      this.zoomX = card.offsetWidth ? rect.width / card.offsetWidth : 1;
+      this.zoomY = card.offsetHeight ? rect.height / card.offsetHeight : 1;
       this.pointerId = e.pointerId;
       this.startX = e.clientX;
       this.startY = e.clientY;
@@ -356,8 +362,17 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         this.maxW = this.intVal("data-max-w", 12);
         this.minH = this.intVal("data-min-h", 1);
         this.maxH = this.intVal("data-max-h", 8);
-        this.gapX = parseFloat(pst.columnGap) || 0;
-        this.gapY = parseFloat(pst.rowGap) || 0;
+        // The lattice is gapless; the card's own margins play the "gap" role
+        // in the span<->px formulas (box = n*stride - gap).
+        var mst = getComputedStyle(card);
+        this.gapX =
+          (parseFloat(pst.columnGap) || 0) +
+          (parseFloat(mst.marginLeft) || 0) +
+          (parseFloat(mst.marginRight) || 0);
+        this.gapY =
+          (parseFloat(pst.rowGap) || 0) +
+          (parseFloat(mst.marginTop) || 0) +
+          (parseFloat(mst.marginBottom) || 0);
         this.strideX = this.startW ? (this.startCssW + this.gapX) / this.startW : this.startCssW || 1;
         this.strideY = this.startH ? (this.startCssH + this.gapY) / this.startH : this.startCssH || 1;
         this.minPxW = this.spanPx(this.minW, this.strideX, this.gapX);
@@ -391,8 +406,10 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
       this._onMove = function (ev) {
         if (ev.pointerId !== self.pointerId) return;
-        var dxCss = (ev.clientX - self.startX) / self.zoom;
-        var dyCss = (ev.clientY - self.startY) / self.zoom;
+        // Mouse released outside the window: no pointerup arrives — cancel.
+        if (ev.pointerType === "mouse" && ev.buttons === 0) return self.cancelResize();
+        var dxCss = (ev.clientX - self.startX) / self.zoomX;
+        var dyCss = (ev.clientY - self.startY) / self.zoomY;
         var wpx = Math.max(self.minPxW, Math.min(self.maxPxW, self.startCssW + dxCss));
         var hpx = Math.max(self.minPxH, Math.min(self.maxPxH, self.startCssH + dyCss));
         card.style.width = wpx + "px";
@@ -417,8 +434,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var card = this.el;
       this.stopTracking();
 
-      var dxCss = (e.clientX - this.startX) / this.zoom;
-      var dyCss = (e.clientY - this.startY) / this.zoom;
+      var dxCss = (e.clientX - this.startX) / this.zoomX;
+      var dyCss = (e.clientY - this.startY) / this.zoomY;
       var pxW = Math.round(Math.max(this.minPxW, Math.min(this.maxPxW, this.startCssW + dxCss)));
       var pxH = Math.round(Math.max(this.minPxH, Math.min(this.maxPxH, this.startCssH + dyCss)));
 
@@ -542,27 +559,28 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       return isNaN(v) ? fallback : v;
     },
 
-    // Per-cell stride + scale from the live grid, so cell math holds at any
-    // fit-zoom and column count.
+    // Per-cell stride + per-axis scale from the live grid, so cell math holds
+    // at any fit-scale and lattice size. The lattice is GAPLESS with explicit
+    // template rows — strides come straight from the grid's dimensions.
     metrics() {
-      var cs = getComputedStyle(this.el);
-      var cols = this.intVal(this.el, "data-cols", 12);
-      var gapX = parseFloat(cs.columnGap) || 0;
-      var gapY = parseFloat(cs.rowGap) || 0;
-      var rowH = parseFloat(cs.gridAutoRows) || 128;
-      var colW = (this.el.offsetWidth - (cols - 1) * gapX) / cols;
+      var cols = this.intVal(this.el, "data-cols", 64);
+      var rows = this.intVal(this.el, "data-max-rows", 36);
       var rect = this.el.getBoundingClientRect();
       return {
         cols: cols,
-        maxRows: this.intVal(this.el, "data-max-rows", 50),
-        strideX: colW + gapX,
-        strideY: rowH + gapY,
-        scale: this.el.offsetWidth ? rect.width / this.el.offsetWidth : 1
+        maxRows: rows,
+        strideX: this.el.offsetWidth / cols,
+        strideY: this.el.offsetHeight / rows,
+        scaleX: this.el.offsetWidth ? rect.width / this.el.offsetWidth : 1,
+        scaleY: this.el.offsetHeight ? rect.height / this.el.offsetHeight : 1
       };
     },
 
     startDrag(e, item) {
       var self = this;
+      // A 0-size grid (hidden pane, pre-layout) would divide into NaN cells —
+      // refuse the drag instead of pushing nonsense placements.
+      if (!this.el.offsetWidth || !this.el.offsetHeight) return;
       this.item = item;
       this.pointerId = e.pointerId;
       this.m = this.metrics();
@@ -650,6 +668,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
       this._onMove = function (ev) {
         if (ev.pointerId !== self.pointerId) return;
+        // Mouse released outside the window: no pointerup arrives — cancel.
+        if (ev.pointerType === "mouse" && ev.buttons === 0) return self.cancel();
         ev.preventDefault();
         self.clone.style.left = ev.clientX - self.grabDX + "px";
         self.clone.style.top = ev.clientY - self.grabDY + "px";
@@ -682,8 +702,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     track() {
       var gridRect = this.el.getBoundingClientRect();
       var cloneRect = this.clone.getBoundingClientRect();
-      var cssLeft = (cloneRect.left - gridRect.left) / this.m.scale;
-      var cssTop = (cloneRect.top - gridRect.top) / this.m.scale;
+      var cssLeft = (cloneRect.left - gridRect.left) / this.m.scaleX;
+      var cssTop = (cloneRect.top - gridRect.top) / this.m.scaleY;
 
       var tx = Math.round(cssLeft / this.m.strideX);
       var ty = Math.round(cssTop / this.m.strideY);
@@ -801,6 +821,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       this.startY = e.clientY;
       this._onMove = function (ev) {
         if (ev.pointerId !== self.pointerId) return;
+        // Mouse released outside the window: no pointerup arrives — cancel.
+        if (ev.pointerType === "mouse" && ev.buttons === 0) return self.cancel();
         self.move(ev);
       };
       this._onUp = function (ev) {
@@ -857,23 +879,26 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       this.canvas = document.getElementById("dashboard-free-grid");
       this.pane = document.getElementById(this.grid ? "dashboard-grid-fit" : "dashboard-free-fit");
 
+      if (this.grid && (!this.grid.offsetWidth || !this.grid.offsetHeight)) {
+        // A 0-size grid (hidden pane, pre-layout) would divide into NaN cells.
+        this.grid = null;
+      }
+
       if (this.grid) {
-        var cs = getComputedStyle(this.grid);
-        var cols = parseInt(this.grid.getAttribute("data-cols"), 10) || 12;
-        var gapX = parseFloat(cs.columnGap) || 0;
-        var gapY = parseFloat(cs.rowGap) || 0;
-        var rowH = parseFloat(cs.gridAutoRows) || 128;
-        var colW = (this.grid.offsetWidth - (cols - 1) * gapX) / cols;
+        var cols = parseInt(this.grid.getAttribute("data-cols"), 10) || 64;
+        var rows = parseInt(this.grid.getAttribute("data-max-rows"), 10) || 36;
         var rect0 = this.grid.getBoundingClientRect();
         this.m = {
           cols: cols,
-          maxRows: parseInt(this.grid.getAttribute("data-max-rows"), 10) || 50,
-          strideX: colW + gapX,
-          strideY: rowH + gapY,
-          scale: this.grid.offsetWidth ? rect0.width / this.grid.offsetWidth : 1
+          maxRows: rows,
+          strideX: this.grid.offsetWidth / cols,
+          strideY: this.grid.offsetHeight / rows,
+          scaleX: this.grid.offsetWidth ? rect0.width / this.grid.offsetWidth : 1,
+          scaleY: this.grid.offsetHeight ? rect0.height / this.grid.offsetHeight : 1
         };
         this.w = Math.min(this.defW, cols);
-        this.h = this.defH;
+        // Clamp height like the server does — the preview must match the drop.
+        this.h = Math.min(this.defH, rows);
         this.blockers = [];
         var sibs = this.grid.querySelectorAll(".sortable-item[data-id]");
         for (var i = 0; i < sibs.length; i++) {
@@ -933,7 +958,11 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     // a drop is exactly "place where the preview shows" or a cancel.
     track(ev) {
       var overCatalog = ev.target && ev.target.closest && ev.target.closest("#dashboard-catalog");
-      var pane = this.pane ? this.pane.getBoundingClientRect() : null;
+      // Grid mode targets the (possibly letterboxed) ARTBOARD, not the whole
+      // pane — a drop in the blank letterbox margins must cancel, not clamp
+      // onto the board. Pixel mode keeps the pane (its canvas fills it).
+      var surface = this.grid || this.pane;
+      var pane = surface ? surface.getBoundingClientRect() : null;
       var over =
         pane &&
         !overCatalog &&
@@ -950,8 +979,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
       if (this.grid) {
         var rect = this.grid.getBoundingClientRect();
-        var tx = Math.floor((ev.clientX - rect.left) / this.m.scale / this.m.strideX);
-        var ty = Math.floor((ev.clientY - rect.top) / this.m.scale / this.m.strideY);
+        var tx = Math.floor((ev.clientX - rect.left) / this.m.scaleX / this.m.strideX);
+        var ty = Math.floor((ev.clientY - rect.top) / this.m.scaleY / this.m.strideY);
         tx = Math.max(0, Math.min(this.m.cols - this.w, tx));
         ty = Math.max(0, Math.min(this.m.maxRows - this.h, ty));
         if (this.collides(tx, ty)) {
@@ -998,8 +1027,8 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       el.style.position = "absolute";
       el.style.left = fx + "px";
       el.style.top = fy + "px";
-      el.style.width = this.defW * 120 + "px";
-      el.style.height = this.defH * 140 + "px";
+      el.style.width = this.defW * 25 + "px";
+      el.style.height = this.defH * 25 + "px";
     },
 
     hidePreview() {
@@ -1129,18 +1158,18 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       // the scaled dimensions so the container scrolls to fit it.
       spacer.style.width = designW * scale + "px";
       spacer.style.height = designH * scale + "px";
-      // Reveal only once scaled, so the pre-fit (unscaled) frame never flashes;
-      // the loading spinner covered the pane until this moment.
+      // Reveal only once scaled, so the pre-fit (unscaled) frame never
+      // flashes — and cancel the no-JS fallback reveal animation.
       canvas.style.opacity = "1";
-      var loading = this.el.querySelector(".pk-free-loading");
-      if (loading) loading.style.display = "none";
+      canvas.style.animation = "none";
     },
   };
 
-  // `DashboardGridFit` — lays the grid out at its design width (`data-design-width`)
-  // and scales it via transform to fit the available space: shrink-to-fit for a
-  // different tier's preview; FILL (past 1:1) on the native tier + fullscreen.
-  // Editable at any scale — the drag + resize hooks are transform-aware. Re-fits on resize / fullscreen change (both fire the RO).
+  // `DashboardGridFit` — sizes the grid canvas into the pane. Standard 25px
+  // cells: per-axis stretch absorbs the last <=10% (a fitted screen fills
+  // exactly); otherwise the artboard shrinks to fit a smaller pane or floats
+  // centered at natural size in a bigger one — never blown up. Editable at
+  // any scale; re-fits on resize / fullscreen change (both fire the RO).
   window.PhoenixKitDashboardsHooks.DashboardGridFit = {
     mounted() {
       var self = this;
@@ -1164,51 +1193,89 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       window.removeEventListener("resize", this._onResize);
     },
 
+    // ONE SCREENFUL, NEVER SCROLLS. The design canvas (cols*25 x rows*25)
+    // scales into the pane:
+    //  - when the pane's shape roughly matches the layout's (per-axis scales
+    //    within ~10% of each other), scale each axis independently — the
+    //    board fills the pane edge-to-edge, cells go imperceptibly
+    //    non-square, no orphan strip;
+    //  - beyond that tolerance, uniform scale + letterbox: an intact
+    //    artboard, centered (designing a portrait layout on a landscape
+    //    monitor shows a phone-shaped frame — never distortion).
     fit() {
       var canvas = this.el.querySelector(".pk-grid-scale-canvas");
       var spacer = this.el.querySelector(".pk-grid-scale-spacer");
       if (!canvas || !spacer) return;
 
       var designW = parseFloat(this.el.getAttribute("data-design-width")) || canvas.offsetWidth;
-      if (!designW) return;
+      var designH = parseFloat(this.el.getAttribute("data-design-height")) || canvas.offsetHeight;
+      if (!designW || !designH) return;
 
       var cs = getComputedStyle(this.el);
-      var pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
-      var avail = this.el.clientWidth - pad;
-      if (avail <= 0) return;
+      var padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+      var padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      var availW = this.el.clientWidth - padX;
+      var availH = this.el.clientHeight - padY;
+      if (availW <= 0 || availH <= 0) return;
 
-      // Fill (scale up past 1:1) in fullscreen and on the viewer's NATIVE tier
-      // (data-fill) — a wide monitor shouldn't waste dead margins beside its
-      // own tier's grid. A DIFFERENT tier's preview stays capped at 1:1 so a
-      // phone design isn't blown up comically on a desktop.
-      var fullscreen = document.fullscreenElement && document.fullscreenElement.contains(this.el);
-      var fill = fullscreen || this.el.getAttribute("data-fill") === "true";
-      var scale = fill ? avail / designW : Math.min(1, avail / designW);
+      var sx = availW / designW;
+      var sy = availH / designH;
+      // Tight on purpose: the stretch exists to absorb Fit-screen rounding
+      // (±half a cell ≈ 1-2%), and anything past ~4% visibly distorts the
+      // board's shape — a Square layout must LOOK square.
+      var TOLERANCE = 1.04;
 
-      canvas.style.transformOrigin = "top left";
-      canvas.style.transform = "scale(" + scale + ")";
-
-      // The spacer spans the FULL design surface (Grid.max_rows), not just the
-      // occupied rows — so every row is scroll-reachable and a widget can be
-      // placed anywhere up front. Without this, a grid shorter than the pane
-      // has no vertical scrollbar at all and its lower rows are unreachable.
-      var grid = canvas.querySelector("#dashboard-grid");
-      var surfaceH = 0;
-
-      if (grid) {
-        var gcs = getComputedStyle(grid);
-        var rowH = parseFloat(gcs.gridAutoRows) || 128;
-        var rowGap = parseFloat(gcs.rowGap) || 0;
-        var maxRows = parseInt(grid.getAttribute("data-max-rows"), 10) || 50;
-        surfaceH = maxRows * (rowH + rowGap) - rowGap;
+      // STANDARD CELLS: the lattice cell is a real 25px, and the stretch only
+      // absorbs the last few % so a fitted screen fills exactly edge-to-edge.
+      // Anything else renders as an intact artboard: shrunk to fit when the
+      // pane is smaller, FLOATING CENTERED at natural size when it's bigger —
+      // never blown up (a bigger display wants its own fitted layout).
+      if (Math.max(sx, sy) / Math.min(sx, sy) > TOLERANCE || Math.min(sx, sy) > TOLERANCE) {
+        sx = sy = Math.min(sx, sy, 1);
       }
 
-      // offsetHeight is the UNSCALED layout height (transform doesn't affect it);
-      // the spacer carries the scaled dims so the container scrolls + centers.
-      spacer.style.width = designW * scale + "px";
-      spacer.style.height = Math.max(canvas.offsetHeight, surfaceH) * scale + "px";
+      // NATIVE sizing, no transform: the grid re-lays-out at the fitted size,
+      // so text and SVG (the analog clock!) render undistorted and crisp —
+      // only the CELL RECTANGLES go imperceptibly non-square in stretch mode.
+      canvas.style.transform = "";
+      canvas.style.width = designW * sx + "px";
+      canvas.style.height = designH * sy + "px";
+      // Widgets clamp their cq type into a consistent px range; the scale var
+      // keeps those clamps proportional when the board renders scaled down.
+      canvas.style.setProperty("--pk-scale", String(Math.min(sx, sy)));
+
+      // The spacer carries the fitted dims; the flex-centered pane positions it.
+      spacer.style.width = designW * sx + "px";
+      spacer.style.height = designH * sy + "px";
       canvas.style.opacity = "1";
+
+      canvas.style.animation = "none";
+
+      // The caption is editor chrome below the board — show it only when the
+      // letterbox leaves room there (stretch mode fills edge-to-edge).
+      var caption = this.el.querySelector(".pk-grid-caption");
+      if (caption) caption.style.display = availH - designH * sy >= 20 ? "" : "none";
     },
+  };
+
+  // `DashboardFitScreen` — the Layout bar's "Fit screen" button: report the
+  // REAL screen pixels (not the pane — the layout should match the display,
+  // which is what fullscreen/kiosk rendering gets) so the server can size the
+  // layout's lattice to this screen.
+  window.PhoenixKitDashboardsHooks.DashboardFitScreen = {
+    mounted() {
+      var self = this;
+      this._onClick = function () {
+        self.pushEvent("fit_screen", {
+          w: window.screen && window.screen.width ? window.screen.width : window.innerWidth,
+          h: window.screen && window.screen.height ? window.screen.height : window.innerHeight
+        });
+      };
+      this.el.addEventListener("click", this._onClick);
+    },
+    destroyed() {
+      this.el.removeEventListener("click", this._onClick);
+    }
   };
 
   // `DashboardFullscreen` — a button that toggles native fullscreen on its
@@ -1227,8 +1294,45 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         }
       };
       this.el.addEventListener("click", this._onClick);
+
+      // Idle-cursor (YouTube-style): in fullscreen the pointer auto-hides after
+      // a spell of no movement and reappears the instant it moves — a wall TV
+      // shouldn't show a stray arrow. Driven by the `pk-cursor-idle` class
+      // (CSS forces `cursor: none` on the fullscreen subtree while set).
+      this._idleTimer = null;
+      this._fsEl = null;
+
+      this._bump = function () {
+        if (!self._fsEl) return;
+        self._fsEl.classList.remove("pk-cursor-idle");
+        if (self._idleTimer) clearTimeout(self._idleTimer);
+        self._idleTimer = setTimeout(function () {
+          if (self._fsEl && document.fullscreenElement) self._fsEl.classList.add("pk-cursor-idle");
+        }, 2500);
+      };
+
+      this._stopIdle = function () {
+        if (self._idleTimer) {
+          clearTimeout(self._idleTimer);
+          self._idleTimer = null;
+        }
+        if (self._fsEl) {
+          self._fsEl.classList.remove("pk-cursor-idle");
+          self._fsEl.removeEventListener("mousemove", self._bump);
+          self._fsEl = null;
+        }
+      };
+
       this._onFsChange = function () {
         window.dispatchEvent(new Event("resize"));
+
+        if (document.fullscreenElement) {
+          self._fsEl = document.fullscreenElement;
+          self._fsEl.addEventListener("mousemove", self._bump);
+          self._bump();
+        } else {
+          self._stopIdle();
+        }
       };
       document.addEventListener("fullscreenchange", this._onFsChange);
     },
@@ -1236,32 +1340,28 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     destroyed() {
       if (this._onClick) this.el.removeEventListener("click", this._onClick);
       if (this._onFsChange) document.removeEventListener("fullscreenchange", this._onFsChange);
+      if (this._stopIdle) this._stopIdle();
     },
   };
 
-  // `DashboardBreakpoint` — on connect, matches the viewport width against the tier
-  // thresholds (from `data-breakpoints`, ordered largest→smallest) and pushes
-  // `detect_bp` ONCE so a grid dashboard opens at the tier that best fits the screen
-  // and stays there. The grid is hidden until this settles, so no wrong-tier flash.
-  window.PhoenixKitDashboardsHooks.DashboardBreakpoint = {
+  // `DashboardVisibility` — pause the server's live-widget refresh loop while
+  // this tab is hidden, resume (snap-to-now) when it returns. The refresh loop
+  // runs server-side and isn't throttled, so without this a backgrounded tab
+  // accumulates a clock update every second; on refocus the whole backlog
+  // replays in a visible burst ("fast-forward"). visibilitychange fires before
+  // the browser throttles, so the pause reliably lands.
+  window.PhoenixKitDashboardsHooks.DashboardVisibility = {
     mounted() {
-      var tiers = [];
-      try {
-        tiers = JSON.parse(this.el.getAttribute("data-breakpoints") || "[]");
-      } catch (e) {
-        tiers = [];
-      }
+      var self = this;
+      this._onVis = function () {
+        self.pushEvent(document.hidden ? "refresh_pause" : "refresh_resume", {});
+      };
+      document.addEventListener("visibilitychange", this._onVis);
+    },
 
-      var w = window.innerWidth;
-      var bp = tiers.length ? tiers[tiers.length - 1].k : null;
-      for (var i = 0; i < tiers.length; i++) {
-        if (w >= tiers[i].w) {
-          bp = tiers[i].k;
-          break;
-        }
-      }
-
-      if (bp) this.pushEvent("detect_bp", { bp: bp });
+    destroyed() {
+      if (this._onVis) document.removeEventListener("visibilitychange", this._onVis);
     },
   };
+
 })();

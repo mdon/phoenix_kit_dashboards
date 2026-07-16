@@ -111,20 +111,17 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidgetTest do
       refute analog =~ ~r/>\s*(AM|PM)\s*</
     end
 
-    test "a single-row instance compacts instead of overflowing (no scrollbars in a clock)" do
-      compact = render_clock(view: "digital", size: %{w: 3, h: 1}, settings: %{"label" => "NYC"})
-      # Smaller digits + tighter padding + no date line; the root clips as a
-      # last resort. The label stays — it's the point of a world-clock row.
-      assert compact =~ "text-2xl"
-      refute compact =~ "text-4xl"
-      assert compact =~ "overflow-hidden"
-      assert compact =~ "NYC"
+    test "type scales to the box via container-query units (no size-based reflexes)" do
+      # The body is a size container and the digits use cq units — the clock
+      # fits ANY box by scaling, never by silently switching density.
+      html = render_clock(view: "digital", size: %{w: 12, h: 4}, settings: %{"label" => "NYC"})
+      assert html =~ "container-type:size"
+      assert html =~ "cqmin"
+      assert html =~ "overflow-hidden"
+      assert html =~ "NYC"
 
-      roomy = render_clock(view: "digital", size: %{w: 3, h: 2})
-      assert roomy =~ "text-4xl"
-
-      normal_compact = render_clock(size: %{w: 2, h: 1})
-      refute normal_compact =~ ~r/\d{4}-\d{2}-\d{2}/
+      # The rendered markup is size-independent — same classes at any span.
+      assert render_clock(view: "digital", size: %{w: 40, h: 20}) =~ "cqmin"
     end
 
     test "a per-clock offset changes the displayed hour" do

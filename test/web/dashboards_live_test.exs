@@ -14,7 +14,8 @@ defmodule PhoenixKitDashboards.Web.DashboardsLiveTest do
     test "renders the empty state with no dashboards", %{conn: conn} do
       {conn, _user} = sign_in(conn)
       {:ok, _view, html} = live(conn, "/en/admin/dashboards")
-      assert html =~ "Dashboards"
+      # No in-page <h1> — the admin header breadcrumb carries the page title.
+      assert html =~ "Create dashboard"
       assert html =~ "No dashboards yet"
     end
 
@@ -28,28 +29,22 @@ defmodule PhoenixKitDashboards.Web.DashboardsLiveTest do
   end
 
   describe "create" do
-    test "the create form is behind a modal, opened by the Create button", %{conn: conn} do
+    test "the Create button links to the dedicated form page", %{conn: conn} do
       {conn, _user} = sign_in(conn)
-      {:ok, view, html} = live(conn, "/en/admin/dashboards")
+      {:ok, _view, html} = live(conn, "/en/admin/dashboards")
 
-      # No inline form — the title input only appears once the modal is opened.
-      refute html =~ ~s(name="title")
-      opened = render_click(view, "open_create", %{})
-      assert opened =~ ~s(name="title")
-      assert opened =~ "New dashboard"
-
-      # Backdrop / Cancel closes it again.
-      assert render_click(view, "close_create", %{}) =~ "Dashboards"
-      refute render(view) =~ ~s(name="title")
+      # The old create modal is gone — creating happens on its own page.
+      refute html =~ "dashboard-create-modal"
+      assert html =~ "/en/admin/dashboards/new"
     end
 
-    test "creates a dashboard and live-redirects to its builder", %{conn: conn} do
+    test "the form page creates a dashboard and live-redirects to its builder", %{conn: conn} do
       {conn, user} = sign_in(conn)
-      {:ok, view, _html} = live(conn, "/en/admin/dashboards")
-      render_click(view, "open_create", %{})
+      {:ok, view, html} = live(conn, "/en/admin/dashboards/new")
+      assert html =~ ~s(name="title")
 
       {:error, {:live_redirect, %{to: to}}} =
-        view |> form("form[phx-submit='create']", %{"title" => "Fresh Board"}) |> render_submit()
+        view |> form("#dashboard-form", %{"title" => "Fresh Board"}) |> render_submit()
 
       assert to =~ "/en/admin/dashboards/"
 
@@ -61,12 +56,11 @@ defmodule PhoenixKitDashboards.Web.DashboardsLiveTest do
       conn: conn
     } do
       {conn, _user} = sign_in(conn)
-      {:ok, view, _html} = live(conn, "/en/admin/dashboards")
-      render_click(view, "open_create", %{})
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/new")
 
       {:error, {:live_redirect, %{to: to}}} =
         view
-        |> form("form[phx-submit='create']", %{"title" => "Canvas One", "type" => "pixel"})
+        |> form("#dashboard-form", %{"title" => "Canvas One", "type" => "pixel"})
         |> render_submit()
 
       "/en/admin/dashboards/" <> uuid = to
@@ -75,15 +69,49 @@ defmodule PhoenixKitDashboards.Web.DashboardsLiveTest do
     end
   end
 
-  describe "create shared" do
-    test "creates a system (shared) dashboard when scope=system", %{conn: conn} do
-      {conn, _user} = sign_in(conn)
-      {:ok, view, _html} = live(conn, "/en/admin/dashboards")
-      render_click(view, "open_create", %{})
+  describe "edit" do
+    test "updates title and visibility; the type select is locked", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid, %{title: "Before"})
+
+      {:ok, view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}/edit")
+      # Type is fixed at creation: no submittable type select on edit.
+      refute html =~ ~s(name="type")
+      assert html =~ ~s(name="type_locked")
 
       {:error, {:live_redirect, %{to: to}}} =
         view
-        |> form("form[phx-submit='create']", %{"title" => "Team Board", "scope" => "system"})
+        |> form("#dashboard-form", %{"title" => "After", "scope" => "system"})
+        |> render_submit()
+
+      assert to =~ "/en/admin/dashboards"
+      updated = Dashboards.get(dashboard.uuid)
+      assert updated.title == "After"
+      assert updated.scope == "system"
+      assert updated.owner_user_uuid == nil
+      assert_activity_logged("dashboard.updated", actor_uuid: user.uuid)
+    end
+
+    test "someone else's personal dashboard is not editable", %{conn: conn} do
+      {conn, _user} = sign_in(conn)
+      other = user_fixture()
+      foreign = fixture_dashboard(other.uuid, %{title: "Not Yours"})
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               live(conn, "/en/admin/dashboards/#{foreign.uuid}/edit")
+
+      assert to =~ "/en/admin/dashboards"
+    end
+  end
+
+  describe "create shared" do
+    test "creates a system (shared) dashboard when scope=system", %{conn: conn} do
+      {conn, _user} = sign_in(conn)
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/new")
+
+      {:error, {:live_redirect, %{to: to}}} =
+        view
+        |> form("#dashboard-form", %{"title" => "Team Board", "scope" => "system"})
         |> render_submit()
 
       "/en/admin/dashboards/" <> uuid = to
@@ -100,13 +128,13 @@ defmodule PhoenixKitDashboards.Web.DashboardsLiveTest do
       {conn, _user} = sign_in(conn)
       role_uuid = Ecto.UUID.generate()
 
-      {:ok, view, _html} = live(conn, "/en/admin/dashboards")
-      render_click(view, "open_create", %{})
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/new")
 
-      # Submitted at the event level: the role select only renders when the
-      # host has roles, but the handler path must hold regardless.
+      # Submitted at the event level: role creation is HIDDEN in the UI for
+      # now (no "By role" option on the form page), but the backend handler
+      # path stays supported — existing role dashboards keep working.
       {:error, {:live_redirect, %{to: to}}} =
-        render_submit(view, "create", %{
+        render_submit(view, "save", %{
           "title" => "Developer Board",
           "type" => "grid",
           "scope" => "role",
@@ -186,6 +214,32 @@ defmodule PhoenixKitDashboards.Web.DashboardsLiveTest do
       render_click(view, "delete", %{"uuid" => foreign.uuid})
 
       assert Dashboards.get(foreign.uuid) != nil
+    end
+
+    test "cannot blind-delete a role dashboard the actor can't see (crafted uuid)", %{conn: conn} do
+      {conn, _user} = sign_in(conn)
+
+      # A role dashboard whose role the signed-in actor is NOT a member of —
+      # it isn't in their list, so no button renders. The handler must still
+      # refuse it (delete now requires can_view?, mirroring clone).
+      {:ok, role_dash} =
+        Dashboards.create(%{
+          title: "Other team",
+          scope: "role",
+          role_uuid: Ecto.UUID.generate()
+        })
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards")
+      render_click(view, "delete", %{"uuid" => role_dash.uuid})
+
+      assert Dashboards.get(role_dash.uuid) != nil
+    end
+
+    test "a malformed delete uuid is a no-op, not a crash", %{conn: conn} do
+      {conn, _user} = sign_in(conn)
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards")
+
+      assert render_click(view, "delete", %{"uuid" => "not-a-uuid"}) =~ "Could not delete"
     end
   end
 end

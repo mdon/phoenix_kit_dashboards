@@ -27,18 +27,6 @@ defmodule PhoenixKitDashboards.Web.Helpers do
   def scope_label("role"), do: Gettext.gettext(PhoenixKitWeb.Gettext, "role")
   def scope_label(other), do: other
 
-  @doc """
-  Translated label for a breakpoint tier. Literal-call clauses on purpose: the
-  gettext extractor only sees literal arguments, so rendering
-  `Breakpoints.get(key).label` through a variable would never localize.
-  """
-  @spec bp_label(String.t()) :: String.t()
-  def bp_label("tv"), do: Gettext.gettext(PhoenixKitWeb.Gettext, "TV")
-  def bp_label("desktop"), do: Gettext.gettext(PhoenixKitWeb.Gettext, "Desktop")
-  def bp_label("ipad"), do: Gettext.gettext(PhoenixKitWeb.Gettext, "iPad")
-  def bp_label("phone"), do: Gettext.gettext(PhoenixKitWeb.Gettext, "Phone")
-  def bp_label(other), do: other
-
   @doc "The current user's uuid from socket assigns, or `nil`."
   @spec actor_uuid(Phoenix.LiveView.Socket.t()) :: String.t() | nil
   def actor_uuid(socket) do
