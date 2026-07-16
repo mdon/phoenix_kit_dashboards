@@ -133,9 +133,11 @@ defmodule PhoenixKitDashboards.DashboardsTest do
   describe "clone/3" do
     test "copies a shared dashboard into a personal one with fresh instance ids" do
       user = user_fixture()
-      {:ok, shared} = Dashboards.create(%{title: "Team KPIs", scope: "system"})
+
+      {:ok, shared} =
+        Dashboards.create(%{title: "Team KPIs", scope: "system", config: %{"type" => "pixel"}})
+
       {:ok, shared} = Dashboards.add_widget(shared, "core.note")
-      {:ok, shared} = Dashboards.set_layout_mode(shared, "free")
       [%{"id" => source_id}] = shared.layout
 
       assert {:ok, clone} = Dashboards.clone(shared, user.uuid, actor_uuid: user.uuid)
@@ -150,8 +152,8 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert clone.scope == "personal"
       assert clone.owner_user_uuid == user.uuid
       assert clone.title == "Team KPIs (copy)"
-      # Config carried over.
-      assert clone.config["mode"] == "free"
+      # Config (incl. the fixed type) carried over.
+      assert clone.config["type"] == "pixel"
       # Layout copied but with a NEW instance id (independent from the source).
       assert [%{"widget_key" => "core.note", "id" => clone_id}] = clone.layout
       assert clone_id != source_id
@@ -524,7 +526,16 @@ defmodule PhoenixKitDashboards.DashboardsTest do
     end
   end
 
-  describe "grid dimensions (resize_grid/4)" do
+  describe "get/1 id validation" do
+    test "a malformed (non-uuid) id returns nil, never raises Ecto.Query.CastError" do
+      assert Dashboards.get("not-a-uuid") == nil
+      assert Dashboards.get("") == nil
+      # A well-formed but absent uuid is nil too.
+      assert Dashboards.get(Ecto.UUID.generate()) == nil
+    end
+  end
+
+  describe "grid dimensions (set_grid_dims/4)" do
     setup do
       {:ok, d0} = Dashboards.create(%{title: "Dims", scope: "system"})
       {:ok, dashboard} = Dashboards.add_widget(d0, "core.note")
@@ -539,12 +550,10 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert Dashboards.grid_rows(d, "ghost") == 36
     end
 
-    test "adding a column/row updates the layout entry and persists", %{dashboard: d} do
-      assert {:ok, d1} = Dashboards.resize_grid(d, "l1", :cols, 1)
+    test "setting explicit dims updates the layout entry and persists", %{dashboard: d} do
+      assert {:ok, d1} = Dashboards.set_grid_dims(d, "l1", 65, 37)
       assert Dashboards.grid_cols(d1, "l1") == 65
-
-      assert {:ok, d2} = Dashboards.resize_grid(d1, "l1", :rows, 1)
-      assert Dashboards.grid_rows(d2, "l1") == 37
+      assert Dashboards.grid_rows(d1, "l1") == 37
 
       # Persisted, not just in the returned struct.
       reloaded = Dashboards.get(d.uuid)
@@ -552,17 +561,16 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert Dashboards.grid_rows(reloaded, "l1") == 37
 
       # Unknown layout ids are a no-op.
-      assert {:ok, _} = Dashboards.resize_grid(d2, "ghost", :cols, 1)
+      assert {:ok, _} = Dashboards.set_grid_dims(d1, "ghost", 40, 40)
 
-      # set_grid_dims sets both axes exactly ("Fit this screen": 1920x1080
-      # at 25px cells → 77x43).
-      assert {:ok, d3} = Dashboards.set_grid_dims(d2, "l1", 77, 43)
+      # "Fit this screen": 1920x1080 at 25px cells → 77x43.
+      assert {:ok, d3} = Dashboards.set_grid_dims(d1, "l1", 77, 43)
       assert Dashboards.grid_cols(d3, "l1") == 77
       assert Dashboards.grid_rows(d3, "l1") == 43
     end
 
     test "a later per-widget edit keeps the layout's dimensions", %{dashboard: d} do
-      {:ok, d1} = Dashboards.resize_grid(d, "l1", :cols, 1)
+      {:ok, d1} = Dashboards.set_grid_dims(d, "l1", 65, 36)
       [%{"id" => id}] = d1.layout
       {:ok, d2} = Dashboards.place_widget_grid(d1, id, "l1", 2, 2)
       assert Dashboards.grid_cols(d2, "l1") == 65
@@ -601,7 +609,7 @@ defmodule PhoenixKitDashboards.DashboardsTest do
 
     test "placement math honors a widened grid", %{dashboard: d} do
       [%{"id" => id}] = d.layout
-      {:ok, d1} = Dashboards.resize_grid(d, "l1", :cols, 1)
+      {:ok, d1} = Dashboards.set_grid_dims(d, "l1", 65, 36)
       # x=49 with w=16 fits on a 65-col grid (49+16=65) but not the default 64.
       assert {:ok, placed} = Dashboards.place_widget_grid(d1, id, "l1", 49, 0)
       assert %{"x" => 49} = Layout.placement(hd(placed.layout), "l1")
@@ -609,7 +617,7 @@ defmodule PhoenixKitDashboards.DashboardsTest do
 
     test "deleting a layout removes its dimensions with it", %{dashboard: d} do
       {:ok, d1, entry} = Dashboards.add_layout(d, "l1")
-      {:ok, d2} = Dashboards.resize_grid(d1, entry["id"], :cols, 1)
+      {:ok, d2} = Dashboards.set_grid_dims(d1, entry["id"], 65, 36)
       assert Dashboards.grid_cols(d2, entry["id"]) == 65
       {:ok, d3} = Dashboards.delete_layout(d2, entry["id"])
       # Back to the fallback default for the unknown id.
@@ -689,19 +697,6 @@ defmodule PhoenixKitDashboards.DashboardsTest do
     test "defaults to grid mode" do
       {:ok, dashboard} = Dashboards.create(%{title: "M", scope: "system"})
       assert Dashboard.layout_mode(dashboard) == "grid"
-    end
-
-    test "set_layout_mode switches to free and back; ignores invalid" do
-      {:ok, d0} = Dashboards.create(%{title: "M", scope: "system"})
-
-      {:ok, free} = Dashboards.set_layout_mode(d0, "free")
-      assert Dashboard.layout_mode(free) == "free"
-
-      {:ok, bogus} = Dashboards.set_layout_mode(free, "nonsense")
-      assert Dashboard.layout_mode(bogus) == "free"
-
-      {:ok, grid} = Dashboards.set_layout_mode(bogus, "grid")
-      assert Dashboard.layout_mode(grid) == "grid"
     end
 
     test "restack_widget_px brings a pixel widget above / below every other" do

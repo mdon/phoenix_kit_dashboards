@@ -54,6 +54,9 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
   @impl true
   def handle_event("delete", %{"uuid" => uuid}, socket) do
     with %{} = dashboard <- Dashboards.get(uuid),
+         # Must be able to SEE it to delete it (mirrors clone) — so a crafted
+         # uuid can't blind-delete a role dashboard the actor isn't a member of.
+         true <- can_view?(dashboard, socket),
          true <- can_delete?(dashboard, socket),
          {:ok, _} <- Dashboards.delete(dashboard, actor_opts(socket)) do
       {:noreply,

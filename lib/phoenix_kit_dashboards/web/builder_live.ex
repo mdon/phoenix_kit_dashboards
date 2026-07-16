@@ -139,7 +139,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     Process.put(:pk_refresh_at, %{})
     # Kick an immediate tick only if the loop isn't already pending (a quick
     # hide→show still has its in-flight tick, which now sees paused? = false).
+    # Latch BEFORE sending — events are processed one-at-a-time, so spamming
+    # `refresh_resume` would otherwise enqueue N ticks that each spawn their own
+    # self-rescheduling loop (a self-DoS).
     unless Process.get(:pk_refresh_scheduled, false) do
+      Process.put(:pk_refresh_scheduled, true)
       send(self(), :refresh_tick)
     end
 
@@ -166,8 +170,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           socket = assign(socket, :dashboard, dashboard)
           do_handle_event(event, params, ensure_active_layout(socket))
         else
-          # Access can change mid-session (scope flipped to someone else's
-          # personal, role membership revoked) — fail closed like a fresh mount.
+          # Access is re-checked against the FRESH dashboard row, so a scope
+          # flip (e.g. re-scoped to someone else's personal) fails closed here.
+          # NOTE: the actor's roles/permissions come from the mount-time scope
+          # (core's on_mount doesn't re-run per event), so a role/permission
+          # REVOCATION only takes effect on the next remount — not mid-session.
           {:noreply,
            socket
            |> put_flash(
@@ -425,21 +432,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end
   end
 
-  defp do_handle_event("grid_dim", %{"dim" => dim, "delta" => delta}, socket) do
-    with {:ok, dim} <- Map.fetch(%{"cols" => :cols, "rows" => :rows}, dim),
-         d when d in [-1, 1] <- to_i(delta) do
-      # set_grid_dims NEVER refuses — it clamps to the occupied extent — so
-      # the only outcomes are the updated dashboard or a transient DB error.
-      apply_layout(
-        socket,
-        Dashboards.resize_grid(socket.assigns.dashboard, socket.assigns.active_layout, dim, d)
-      )
-    else
-      # Crafted/malformed payloads are ignored.
-      _ -> {:noreply, socket}
-    end
-  end
-
   # Free/pixel-canvas resize (DashboardResize hook, free mode): absolute px size,
   # no snap. Stored under fw/fh; the context clamps to a sane px range.
   defp do_handle_event("resize_widget_to", %{"id" => id, "fw" => fw, "fh" => fh}, socket)
@@ -553,9 +545,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       |> maybe_put_min_override(params["min_override"])
 
     # On the grid the view is a PER-LAYOUT setting (stored on the active
-    # layout's placement); everything else stays instance-level.
+    # layout's placement); everything else stays instance-level. `is_binary`
+    # guards a crafted non-string `view` (set_layout_view/4 requires a binary).
     socket =
-      if grid? && params["view"] not in [nil, ""] do
+      if grid? and is_binary(params["view"]) and params["view"] != "" do
         case Dashboards.set_layout_view(
                socket.assigns.dashboard,
                instance_id,
@@ -591,6 +584,9 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           apply_or_keep(d2, &maybe_resize(&1, instance_id, socket.assigns.active_layout, params))
 
         {:noreply, assign(socket, :dashboard, d3)}
+
+      {:error, :stale} ->
+        {:noreply, resync(socket)}
 
       {:error, _} ->
         {:noreply, socket}
@@ -772,8 +768,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     px = Layout.pixel(inst)
 
     %{
-      "w" => max(round((px["fw"] || 0) / Lattice.cell()), 1),
-      "h" => max(round((px["fh"] || 0) / Lattice.cell()), 1)
+      "w" => max(round(to_int(px["fw"], 0) / Lattice.cell()), 1),
+      "h" => max(round(to_int(px["fh"], 0) / Lattice.cell()), 1)
     }
   end
 
@@ -1673,9 +1669,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # widget's `size` is the placement for the tier being viewed (so density-aware
   # widgets adapt), falling back to the default tier when none is given (pixel mode).
   # A placed widget is re-gated by the same visibility rule as the catalog
-  # (module enabled + scope permission) — otherwise disabling a module (or
-  # revoking access) would keep its widgets querying and showing live data on
-  # any dashboard they were already placed on. The card chrome stays, so the
+  # (module enabled + scope permission) — so DISABLING a module immediately
+  # stops its widgets rendering/querying (a fresh ModuleRegistry lookup). A
+  # scope PERMISSION revocation uses the mount-time scope, so it takes effect
+  # on the next remount, not mid-session. The card chrome stays, so the
   # instance can still be removed or moved while unavailable.
   attr(:inst, :map, required: true)
   attr(:scope, :any, required: true)

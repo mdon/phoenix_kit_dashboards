@@ -40,7 +40,6 @@ defmodule PhoenixKitDashboards.Schemas.Dashboard do
   @foreign_key_type :binary_id
 
   @scopes ~w(personal system role)
-  @layout_modes ~w(grid free)
 
   # A dashboard's TYPE is fixed at creation: "grid" (screenful lattice) or
   # "pixel" (a free-placement canvas). Replaces the old per-dashboard "mode"
@@ -114,10 +113,6 @@ defmodule PhoenixKitDashboards.Schemas.Dashboard do
   def config_changeset(dashboard, config) when is_map(config) do
     change(dashboard, config: config)
   end
-
-  @doc "List of valid layout-mode strings."
-  @spec layout_modes() :: [String.t()]
-  def layout_modes, do: @layout_modes
 
   @doc """
   The dashboard's fixed **type** — `"grid"` (screenful lattice) or `"pixel"`

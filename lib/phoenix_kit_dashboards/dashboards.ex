@@ -52,9 +52,20 @@ defmodule PhoenixKitDashboards.Dashboards do
     repo().all(query)
   end
 
-  @doc "Fetch one dashboard by uuid, or nil."
+  @doc "Fetch one dashboard by uuid, or nil (nil too for a malformed id)."
   @spec get(String.t()) :: Dashboard.t() | nil
-  def get(uuid) when is_binary(uuid), do: repo().get(Dashboard, uuid)
+  def get(uuid) when is_binary(uuid) do
+    # A non-UUID id would make `Repo.get` raise `Ecto.Query.CastError` (the PK
+    # is UUIDv7) — but every caller treats "not found" as nil, and hostile
+    # `/dashboards/<junk>` URLs / crafted `phx-value-uuid` reach here. Validate
+    # first so a bad id is a clean nil, not a 500.
+    case Ecto.UUID.cast(uuid) do
+      {:ok, valid} -> repo().get(Dashboard, valid)
+      :error -> nil
+    end
+  end
+
+  def get(_uuid), do: nil
 
   @doc """
   Whether a dashboard is visible to a user — the single scope-visibility rule,
@@ -580,8 +591,14 @@ defmodule PhoenixKitDashboards.Dashboards do
   @spec layouts(Dashboard.t()) :: [map()]
   def layouts(%Dashboard{} = dashboard) do
     case dashboard.config do
-      %{"layouts" => [_ | _] = entries} -> Enum.map(entries, &normalize_entry/1)
-      _ -> [@default_layout]
+      %{"layouts" => [_ | _] = entries} ->
+        case Enum.filter(entries, &match?(%{"id" => _}, &1)) do
+          [] -> [@default_layout]
+          valid -> Enum.map(valid, &normalize_entry/1)
+        end
+
+      _ ->
+        [@default_layout]
     end
   end
 
@@ -797,19 +814,6 @@ defmodule PhoenixKitDashboards.Dashboards do
     end
   end
 
-  @doc """
-  Grow/shrink a layout's grid by `delta` columns or rows (the builder's +/-
-  steppers). Same clamping rules as `set_grid_dims/4`.
-  """
-  @spec resize_grid(Dashboard.t(), String.t(), :cols | :rows, integer()) ::
-          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
-  def resize_grid(%Dashboard{} = dashboard, layout_id, dim, delta)
-      when is_binary(layout_id) and dim in [:cols, :rows] and is_integer(delta) do
-    cols = grid_cols(dashboard, layout_id) + if(dim == :cols, do: delta, else: 0)
-    rows = grid_rows(dashboard, layout_id) + if(dim == :rows, do: delta, else: 0)
-    set_grid_dims(dashboard, layout_id, cols, rows)
-  end
-
   @doc "The design-space canvas width for a layout (gapless lattice)."
   @spec design_width(Dashboard.t(), String.t()) :: pos_integer()
   def design_width(%Dashboard{} = dashboard, layout_id) do
@@ -947,20 +951,6 @@ defmodule PhoenixKitDashboards.Dashboards do
     case Registry.get(inst["widget_key"]) do
       %Widget{views: views} -> Enum.any?(views, &(&1.key == view))
       _ -> false
-    end
-  end
-
-  @doc """
-  Set the dashboard's layout mode (`"grid"` or `"free"`). Invalid values are
-  ignored. A presentation tweak — not activity-logged.
-  """
-  @spec set_layout_mode(Dashboard.t(), String.t()) ::
-          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
-  def set_layout_mode(%Dashboard{} = dashboard, mode) do
-    if mode in Dashboard.layout_modes() do
-      put_config(dashboard, "mode", mode)
-    else
-      {:ok, dashboard}
     end
   end
 
@@ -1349,7 +1339,7 @@ defmodule PhoenixKitDashboards.Dashboards do
     layout
     |> Enum.map(fn inst ->
       px = Layout.pixel(inst)
-      px["fy"] + px["fh"]
+      int(px["fy"], 0) + int(px["fh"], 0)
     end)
     |> Enum.max(fn -> 0 end)
     |> Kernel.+(16)
@@ -1381,6 +1371,12 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   defp clamp(value, lo, hi) when is_integer(value), do: value |> max(lo) |> min(hi)
   defp clamp(_value, lo, _hi), do: lo
+
+  # Coerce a stored geometry value to an integer (tampered/legacy JSONB may
+  # carry a string or float where an int is expected).
+  defp int(v, _default) when is_integer(v), do: v
+  defp int(v, _default) when is_float(v), do: trunc(v)
+  defp int(_v, default), do: default
 
   # Log a business-level activity on the {:ok, dashboard} branch only, passing
   # through the original result. Guarded + rescued so a logging failure never

@@ -215,5 +215,31 @@ defmodule PhoenixKitDashboards.Web.DashboardsLiveTest do
 
       assert Dashboards.get(foreign.uuid) != nil
     end
+
+    test "cannot blind-delete a role dashboard the actor can't see (crafted uuid)", %{conn: conn} do
+      {conn, _user} = sign_in(conn)
+
+      # A role dashboard whose role the signed-in actor is NOT a member of —
+      # it isn't in their list, so no button renders. The handler must still
+      # refuse it (delete now requires can_view?, mirroring clone).
+      {:ok, role_dash} =
+        Dashboards.create(%{
+          title: "Other team",
+          scope: "role",
+          role_uuid: Ecto.UUID.generate()
+        })
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards")
+      render_click(view, "delete", %{"uuid" => role_dash.uuid})
+
+      assert Dashboards.get(role_dash.uuid) != nil
+    end
+
+    test "a malformed delete uuid is a no-op, not a crash", %{conn: conn} do
+      {conn, _user} = sign_in(conn)
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards")
+
+      assert render_click(view, "delete", %{"uuid" => "not-a-uuid"}) =~ "Could not delete"
+    end
   end
 end

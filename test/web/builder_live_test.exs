@@ -15,6 +15,12 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
   defp grid(uuid), do: Layout.placement(hd(Dashboards.get(uuid).layout), "l1")
   defp pixel(uuid), do: Layout.pixel(hd(Dashboards.get(uuid).layout))
 
+  # The active layout's config entry (cols/rows), post-persist.
+  defp active_layout_entry(uuid) do
+    d = Dashboards.get(uuid)
+    Dashboards.layouts(d) |> Enum.find(&(&1["id"] == "l1"))
+  end
+
   # Every rendered clock time (HH:MM:SS), in DOM order.
   defp clock_times(html) do
     ~r/(\d{2}:\d{2}:\d{2})/ |> Regex.scan(html) |> Enum.map(fn [_, t] -> t end)
@@ -208,7 +214,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
       {:ok, dashboard, entry} = Dashboards.add_layout(dashboard, "l1")
       {:ok, dashboard} = Dashboards.rename_layout(dashboard, entry["id"], "Wall TV")
-      {:ok, dashboard} = Dashboards.resize_grid(dashboard, entry["id"], :cols, 1)
+      {:ok, dashboard} = Dashboards.set_grid_dims(dashboard, entry["id"], 65, 36)
 
       {:ok, _view, html} =
         live(conn, "/en/admin/dashboards/#{dashboard.uuid}?layout=#{entry["id"]}")
@@ -699,6 +705,60 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       # The desktop layout kept its distinctive 10x5 — untouched by the edit.
       assert %{"w" => 10, "h" => 5} =
                Dashboards.resolve_placement(Dashboards.get(dashboard.uuid), id, "l1")
+    end
+  end
+
+  describe "grid-size + hostile params (regression)" do
+    test "set_dims resizes the active layout to explicit cols/rows", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      html = render_hook(view, "set_dims", %{"cols" => "50", "rows" => "30"})
+
+      assert html =~ ~s(data-cols="50")
+      assert %{"cols" => 50, "rows" => 30} = active_layout_entry(dashboard.uuid)
+    end
+
+    test "fit_screen converts screen px to cells (px / 25)", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      # 1920x1080 at a 25px cell → 77x43.
+      render_hook(view, "fit_screen", %{"w" => 1920, "h" => 1080})
+
+      assert %{"cols" => 77, "rows" => 43} = active_layout_entry(dashboard.uuid)
+    end
+
+    test "a crafted non-string view in save_settings doesn't crash the view", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.clock")
+      [%{"id" => id}] = dashboard.layout
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+      view |> element("button[phx-click='open_settings'][phx-value-id='#{id}']") |> render_click()
+
+      # set_layout_view/4 requires a binary — a map/list view must be ignored,
+      # not crash the LiveView.
+      html = render_hook(view, "save_settings", %{"view" => %{"x" => 1}, "settings" => %{}})
+      assert html =~ ~r/\d{2}:\d{2}:\d{2}/
+      # The layout view is unchanged (still the seeded default).
+      assert Layout.view(hd(Dashboards.get(dashboard.uuid).layout), "l1") == "normal"
+    end
+
+    test "spamming refresh_resume does not multiply the refresh loop or crash", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, _dashboard} = Dashboards.add_widget(dashboard, "core.clock")
+
+      {:ok, view, _html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+
+      for _ <- 1..5, do: render_hook(view, "refresh_resume", %{})
+
+      # Still alive and the clock still renders.
+      assert render(view) =~ ~r/\d{2}:\d{2}:\d{2}/
     end
   end
 
