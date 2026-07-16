@@ -201,7 +201,7 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   @doc "Update a dashboard's metadata."
   @spec update(Dashboard.t(), map(), keyword()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def update(%Dashboard{} = dashboard, attrs, opts \\ []) do
     dashboard
     |> Dashboard.changeset(attrs)
@@ -226,7 +226,7 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   @doc "Persist a new full layout (the hot path while editing the grid)."
   @spec save_layout(Dashboard.t(), [map()]) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def save_layout(%Dashboard{} = dashboard, layout) when is_list(layout) do
     dashboard
     |> Dashboard.layout_changeset(layout)
@@ -268,7 +268,9 @@ defmodule PhoenixKitDashboards.Dashboards do
           integer(),
           integer(),
           keyword()
-        ) :: {:ok, Dashboard.t()} | {:error, :unknown_widget | :occupied | Ecto.Changeset.t()}
+        ) ::
+          {:ok, Dashboard.t()}
+          | {:error, :stale | :unknown_widget | :occupied | Ecto.Changeset.t()}
   def add_widget_at(%Dashboard{} = dashboard, widget_key, bp, x, y, opts \\ [])
       when is_binary(bp) and is_integer(x) and is_integer(y) do
     case Registry.get(widget_key) do
@@ -383,7 +385,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   tweak — not activity-logged.
   """
   @spec reorder_widgets(Dashboard.t(), String.t(), [String.t()]) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def reorder_widgets(%Dashboard{} = dashboard, bp, ordered_ids)
       when is_binary(bp) and is_list(ordered_ids) do
     dashboard = materialize_grid(dashboard, bp)
@@ -434,7 +436,7 @@ defmodule PhoenixKitDashboards.Dashboards do
           String.t(),
           integer(),
           integer()
-        ) :: {:ok, Dashboard.t()} | {:error, :occupied | Ecto.Changeset.t()}
+        ) :: {:ok, Dashboard.t()} | {:error, :stale | :occupied | Ecto.Changeset.t()}
   def place_widget_grid(%Dashboard{} = dashboard, instance_id, bp, x, y)
       when is_binary(bp) and is_integer(x) and is_integer(y) do
     dashboard = materialize_grid(dashboard, bp)
@@ -488,7 +490,7 @@ defmodule PhoenixKitDashboards.Dashboards do
           pos_integer(),
           pos_integer()
         ) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def resize_widget(%Dashboard{} = dashboard, instance_id, bp, w, h) when is_binary(bp) do
     dashboard = materialize_grid(dashboard, bp)
     cols = grid_cols(dashboard, bp)
@@ -543,7 +545,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   A layout tweak — not activity-logged.
   """
   @spec hide_widget(Dashboard.t(), instance_id :: String.t(), String.t(), boolean()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def hide_widget(%Dashboard{} = dashboard, instance_id, bp, hidden)
       when is_binary(bp) and is_boolean(hidden) do
     dashboard = materialize_grid(dashboard, bp)
@@ -611,7 +613,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   Returns `{:ok, dashboard, new_entry}`.
   """
   @spec add_layout(Dashboard.t(), String.t(), keyword()) ::
-          {:ok, Dashboard.t(), map()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t(), map()} | {:error, :stale | Ecto.Changeset.t()}
   def add_layout(%Dashboard{} = dashboard, source_id, opts \\ []) when is_binary(source_id) do
     entries = layouts(dashboard)
     source = Enum.find(entries, hd(entries), &(&1["id"] == source_id))
@@ -675,7 +677,7 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   @doc "Rename a layout (blank names are ignored). Not activity-logged."
   @spec rename_layout(Dashboard.t(), String.t(), String.t()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def rename_layout(%Dashboard{} = dashboard, id, name)
       when is_binary(id) and is_binary(name) do
     name = String.trim(name)
@@ -755,7 +757,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   target is raised to fit instead). A layout tweak — not activity-logged.
   """
   @spec set_grid_dims(Dashboard.t(), String.t(), integer(), integer()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def set_grid_dims(%Dashboard{} = dashboard, layout_id, cols, rows)
       when is_binary(layout_id) and is_integer(cols) and is_integer(rows) do
     case get_layout(dashboard, layout_id) do
@@ -800,7 +802,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   steppers). Same clamping rules as `set_grid_dims/4`.
   """
   @spec resize_grid(Dashboard.t(), String.t(), :cols | :rows, integer()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def resize_grid(%Dashboard{} = dashboard, layout_id, dim, delta)
       when is_binary(layout_id) and dim in [:cols, :rows] and is_integer(delta) do
     cols = grid_cols(dashboard, layout_id) + if(dim == :cols, do: delta, else: 0)
@@ -883,7 +885,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   never disturbs the grid placement. A layout tweak — not activity-logged.
   """
   @spec place_widget_px(Dashboard.t(), instance_id :: String.t(), integer(), integer()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def place_widget_px(%Dashboard{} = dashboard, instance_id, fx, fy) do
     update_item(dashboard, instance_id, fn inst ->
       Layout.put_pixel(inst, %{
@@ -898,7 +900,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   clamped to `[@free_min_px, @free_max_px]`. A layout tweak — not activity-logged.
   """
   @spec resize_widget_px(Dashboard.t(), instance_id :: String.t(), integer(), integer()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def resize_widget_px(%Dashboard{} = dashboard, instance_id, fw, fh) do
     update_item(dashboard, instance_id, fn inst ->
       Layout.put_pixel(inst, %{
@@ -916,7 +918,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   see `Layout.view/2`. A presentation tweak — not activity-logged.
   """
   @spec set_layout_view(Dashboard.t(), instance_id :: String.t(), String.t(), String.t()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def set_layout_view(%Dashboard{} = dashboard, instance_id, bp, view)
       when is_binary(bp) and is_binary(view) do
     case Enum.find(dashboard.layout, &(&1["id"] == instance_id)) do
@@ -953,7 +955,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   ignored. A presentation tweak — not activity-logged.
   """
   @spec set_layout_mode(Dashboard.t(), String.t()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def set_layout_mode(%Dashboard{} = dashboard, mode) do
     if mode in Dashboard.layout_modes() do
       put_config(dashboard, "mode", mode)
@@ -968,7 +970,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   deliberate. A layout tweak — not activity-logged.
   """
   @spec restack_widget_px(Dashboard.t(), instance_id :: String.t(), String.t()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def restack_widget_px(%Dashboard{} = dashboard, instance_id, dir)
       when dir in ["front", "back"] do
     others =
@@ -995,7 +997,7 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   @doc "Remove a widget instance by its instance id."
   @spec remove_widget(Dashboard.t(), instance_id :: String.t(), keyword()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def remove_widget(%Dashboard{} = dashboard, instance_id, opts \\ []) do
     layout = Enum.reject(dashboard.layout, &(&1["id"] == instance_id))
 
@@ -1006,7 +1008,7 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   @doc "Replace the settings map of a single widget instance."
   @spec update_widget_settings(Dashboard.t(), instance_id :: String.t(), map(), keyword()) ::
-          {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def update_widget_settings(%Dashboard{} = dashboard, instance_id, settings, opts \\ []) do
     configure_widget(dashboard, instance_id, %{settings: settings}, opts)
   end
@@ -1022,7 +1024,7 @@ defmodule PhoenixKitDashboards.Dashboards do
           instance_id :: String.t(),
           %{optional(:settings) => map(), optional(:view) => String.t() | nil},
           keyword()
-        ) :: {:ok, Dashboard.t()} | {:error, Ecto.Changeset.t()}
+        ) :: {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def configure_widget(%Dashboard{} = dashboard, instance_id, attrs, opts \\ [])
       when is_map(attrs) do
     # Guard `settings` to a real map: a hostile scalar would be stored and later
