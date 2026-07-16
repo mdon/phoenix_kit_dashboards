@@ -513,6 +513,27 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       assert length(after_times) == 2
       assert Enum.all?(Enum.zip(before_times, after_times), fn {b, a} -> a != b end)
     end
+
+    test "tab-visibility pause/resume are handled and don't crash the view", %{conn: conn} do
+      {conn, user} = sign_in(conn)
+      dashboard = fixture_dashboard(user.uuid)
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.clock")
+
+      {:ok, view, html} = live(conn, "/en/admin/dashboards/#{dashboard.uuid}")
+
+      # The visibility hook is wired on the builder root.
+      assert html =~ ~s(id="dashboard-builder")
+      assert html =~ ~s(phx-hook="DashboardVisibility")
+
+      # Hidden → pause; visible → resume (snap-to-now). Both are handled here
+      # (not swallowed by the mutation dispatcher) and keep the view alive.
+      assert render_hook(view, "refresh_pause", %{}) =~ ~r/\d{2}:\d{2}:\d{2}/
+      assert render_hook(view, "refresh_resume", %{}) =~ ~r/\d{2}:\d{2}:\d{2}/
+
+      # A tick after resume still refreshes the clock (loop restarted).
+      send(view.pid, :refresh_tick)
+      assert render(view) =~ ~r/\d{2}:\d{2}:\d{2}/
+    end
   end
 
   describe "settings modal" do

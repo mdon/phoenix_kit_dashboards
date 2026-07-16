@@ -1344,4 +1344,24 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     },
   };
 
+  // `DashboardVisibility` — pause the server's live-widget refresh loop while
+  // this tab is hidden, resume (snap-to-now) when it returns. The refresh loop
+  // runs server-side and isn't throttled, so without this a backgrounded tab
+  // accumulates a clock update every second; on refocus the whole backlog
+  // replays in a visible burst ("fast-forward"). visibilitychange fires before
+  // the browser throttles, so the pause reliably lands.
+  window.PhoenixKitDashboardsHooks.DashboardVisibility = {
+    mounted() {
+      var self = this;
+      this._onVis = function () {
+        self.pushEvent(document.hidden ? "refresh_pause" : "refresh_resume", {});
+      };
+      document.addEventListener("visibilitychange", this._onVis);
+    },
+
+    destroyed() {
+      if (this._onVis) document.removeEventListener("visibilitychange", this._onVis);
+    },
+  };
+
 })();

@@ -90,8 +90,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
      # The layout id currently in inline-rename mode (nil = none).
      |> assign(:renaming_layout, nil)
      # QoL: show the empty grid cells while designing (session-local toggle).
-     |> assign(:show_grid_lines, false)
-     |> assign(:refresh_scheduled?, false)}
+     |> assign(:show_grid_lines, false)}
   end
 
   @impl true
@@ -123,7 +122,31 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end
   end
 
-  # EVERY event operates on a FRESH dashboard: builder sessions are
+  # Tab visibility (DashboardVisibility hook): pause the refresh loop while the
+  # tab is hidden, snap-to-now when it returns — so a backgrounded tab doesn't
+  # accumulate a backlog of clock updates that fast-forwards on refocus. These
+  # aren't mutations, so they bypass the re-fetching dispatcher below.
+  @impl true
+  def handle_event("refresh_pause", _params, socket) do
+    Process.put(:pk_refresh_paused, true)
+    {:noreply, socket}
+  end
+
+  def handle_event("refresh_resume", _params, socket) do
+    Process.put(:pk_refresh_paused, false)
+    # Every widget becomes due, so the next tick refreshes them all to the
+    # CURRENT time at once (a clean snap, not a sweep through buffered ticks).
+    Process.put(:pk_refresh_at, %{})
+    # Kick an immediate tick only if the loop isn't already pending (a quick
+    # hide→show still has its in-flight tick, which now sees paused? = false).
+    unless Process.get(:pk_refresh_scheduled, false) do
+      send(self(), :refresh_tick)
+    end
+
+    {:noreply, socket}
+  end
+
+  # EVERY other event operates on a FRESH dashboard: builder sessions are
   # long-lived and every context write persists the whole JSONB layout
   # column, so acting on the mounted-at copy would clobber anything another
   # session (a second tab, an external script) changed since — wholesale.
@@ -584,40 +607,48 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # Periodic tick: `send_update/2` every live widget whose interval has elapsed
   # so it re-queries. Reschedules itself while any live widget remains.
   @impl true
+  # All refresh-loop state (the latch, the paused flag, the per-widget "last
+  # refreshed" map) lives in the PROCESS DICTIONARY, never socket assigns — an
+  # assign would dirty the socket every tick and force a full-page re-render
+  # (re-running the admin layout's uncached settings query; in dev that can hit
+  # a code-reload window → crash). A tick only `send_update`s the due widgets.
   def handle_info(:refresh_tick, socket) do
-    now = System.monotonic_time(:millisecond)
-    scope = socket.assigns[:phoenix_kit_current_scope]
+    cond do
+      # Tab hidden (the client paused us): go dormant. Otherwise the server keeps
+      # pushing a clock update every second while the tab is backgrounded, the
+      # browser buffers them all, and they replay in a burst ("fast-forward") on
+      # refocus. `refresh_resume` restarts the loop with an immediate snap-to-now.
+      Process.get(:pk_refresh_paused, false) ->
+        Process.put(:pk_refresh_scheduled, false)
+        {:noreply, socket}
 
-    # Resolve each widget's placement for the active tier once, so a refreshed
-    # widget's `size` matches what it first rendered with (no size flip on refresh).
-    placements =
-      socket.assigns.dashboard
-      |> Dashboards.resolve_items(socket.assigns.active_layout)
-      |> Map.new(fn {item, p} -> {item["id"], p} end)
+      any_live_widget?(socket.assigns.dashboard) ->
+        now = System.monotonic_time(:millisecond)
+        scope = socket.assigns[:phoenix_kit_current_scope]
 
-    # The per-widget "last refreshed" map is bookkeeping the template never
-    # renders — keep it in the PROCESS DICTIONARY, not a socket assign. Assigning
-    # it would dirty the socket every tick and force a full-page re-render (which
-    # re-runs the admin layout's uncached settings query, and in dev occasionally
-    # lands in a code-reload window → crash → reconnect). This way a tick only
-    # `send_update`s the due widgets, which re-render on their own.
-    refresh_at =
-      Enum.reduce(
-        socket.assigns.dashboard.layout,
-        Process.get(:pk_refresh_at, %{}),
-        &refresh_due(&1, &2, now, scope, placements)
-      )
+        # Resolve placements once so a refreshed widget's `size` matches what it
+        # first rendered with (no size flip on refresh).
+        placements =
+          socket.assigns.dashboard
+          |> Dashboards.resolve_items(socket.assigns.active_layout)
+          |> Map.new(fn {item, p} -> {item["id"], p} end)
 
-    Process.put(:pk_refresh_at, refresh_at)
+        socket.assigns.dashboard.layout
+        |> Enum.reduce(
+          Process.get(:pk_refresh_at, %{}),
+          &refresh_due(&1, &2, now, scope, placements)
+        )
+        |> then(&Process.put(:pk_refresh_at, &1))
 
-    if any_live_widget?(socket.assigns.dashboard) do
-      Process.send_after(self(), :refresh_tick, @refresh_tick_ms)
-      # Socket UNCHANGED → no parent re-render; only the send_update'd widgets did.
-      {:noreply, socket}
-    else
-      # Loop stops when no live widget remains; clear the latch so re-adding one
-      # can restart it (via maybe_schedule_refresh/1) without a full remount.
-      {:noreply, assign(socket, :refresh_scheduled?, false)}
+        Process.send_after(self(), :refresh_tick, @refresh_tick_ms)
+        Process.put(:pk_refresh_scheduled, true)
+        # Socket UNCHANGED → no parent re-render; only the send_update'd widgets.
+        {:noreply, socket}
+
+      true ->
+        # No live widget left — let the loop stop; re-adding one restarts it.
+        Process.put(:pk_refresh_scheduled, false)
+        {:noreply, socket}
     end
   end
 
@@ -670,13 +701,14 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # Schedule the refresh loop once, when the dashboard has at least one live
   # widget and the socket is connected (no timers during the static mount).
   defp maybe_schedule_refresh(socket) do
-    if connected?(socket) and not socket.assigns.refresh_scheduled? and
+    if connected?(socket) and not Process.get(:pk_refresh_scheduled, false) and
+         not Process.get(:pk_refresh_paused, false) and
          any_live_widget?(socket.assigns.dashboard) do
       Process.send_after(self(), :refresh_tick, @refresh_tick_ms)
-      assign(socket, :refresh_scheduled?, true)
-    else
-      socket
+      Process.put(:pk_refresh_scheduled, true)
     end
+
+    socket
   end
 
   # send_update a single live widget when its interval has elapsed; updates the
@@ -875,7 +907,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     any content growth (a fit-rescale, a widget near the fold) would grow the
     PAGE and pop a window scrollbar — the builder is app-like, its grid/canvas
     panes scroll internally instead. --%>
-    <div class="flex h-[calc(100dvh-4rem)] flex-col">
+    <div id="dashboard-builder" phx-hook="DashboardVisibility" class="flex h-[calc(100dvh-4rem)] flex-col">
       <%!-- FULLSCREEN = DISPLAY MODE: the Full-screen button natively
       fullscreens the canvas pane, so the header/layout bar/catalog (outside it)
       already vanish. These rules strip the remaining per-widget EDIT chrome —
