@@ -1294,8 +1294,45 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         }
       };
       this.el.addEventListener("click", this._onClick);
+
+      // Idle-cursor (YouTube-style): in fullscreen the pointer auto-hides after
+      // a spell of no movement and reappears the instant it moves — a wall TV
+      // shouldn't show a stray arrow. Driven by the `pk-cursor-idle` class
+      // (CSS forces `cursor: none` on the fullscreen subtree while set).
+      this._idleTimer = null;
+      this._fsEl = null;
+
+      this._bump = function () {
+        if (!self._fsEl) return;
+        self._fsEl.classList.remove("pk-cursor-idle");
+        if (self._idleTimer) clearTimeout(self._idleTimer);
+        self._idleTimer = setTimeout(function () {
+          if (self._fsEl && document.fullscreenElement) self._fsEl.classList.add("pk-cursor-idle");
+        }, 2500);
+      };
+
+      this._stopIdle = function () {
+        if (self._idleTimer) {
+          clearTimeout(self._idleTimer);
+          self._idleTimer = null;
+        }
+        if (self._fsEl) {
+          self._fsEl.classList.remove("pk-cursor-idle");
+          self._fsEl.removeEventListener("mousemove", self._bump);
+          self._fsEl = null;
+        }
+      };
+
       this._onFsChange = function () {
         window.dispatchEvent(new Event("resize"));
+
+        if (document.fullscreenElement) {
+          self._fsEl = document.fullscreenElement;
+          self._fsEl.addEventListener("mousemove", self._bump);
+          self._bump();
+        } else {
+          self._stopIdle();
+        }
       };
       document.addEventListener("fullscreenchange", this._onFsChange);
     },
@@ -1303,6 +1340,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     destroyed() {
       if (this._onClick) this.el.removeEventListener("click", this._onClick);
       if (this._onFsChange) document.removeEventListener("fullscreenchange", this._onFsChange);
+      if (this._stopIdle) this._stopIdle();
     },
   };
 

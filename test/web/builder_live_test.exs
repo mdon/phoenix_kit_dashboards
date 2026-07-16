@@ -780,6 +780,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       assert html =~ "display: none !important"
       # The widget's edit bar carries the class those rules hide.
       assert html =~ "pk-widget-chrome"
+      # Idle-cursor rule ships (the hook toggles pk-cursor-idle in fullscreen).
+      assert html =~ ":fullscreen.pk-cursor-idle"
     end
   end
 

@@ -885,6 +885,13 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         :fullscreen #dashboard-grid {
           background-image: none !important;
         }
+        /* Idle-cursor: DashboardFullscreen toggles pk-cursor-idle after a spell
+           of no pointer movement — hide the arrow across the whole subtree
+           (overriding any child cursor), YouTube-style. */
+        :fullscreen.pk-cursor-idle,
+        :fullscreen.pk-cursor-idle * {
+          cursor: none !important;
+        }
       </style>
       <div class="flex items-center justify-between px-4 py-3 border-b border-base-300">
         <div class="flex items-center gap-3">
