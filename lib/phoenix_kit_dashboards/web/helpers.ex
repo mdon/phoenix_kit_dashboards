@@ -7,6 +7,7 @@ defmodule PhoenixKitDashboards.Web.Helpers do
   """
 
   alias PhoenixKit.Users.Roles
+  alias PhoenixKitDashboards.Dashboards
 
   @doc """
   Dynamic translation for catalog DATA (widget names, descriptions, view names,
@@ -67,6 +68,29 @@ defmodule PhoenixKitDashboards.Web.Helpers do
         []
     end
   end
+
+  @doc """
+  Whether `dashboard` is viewable by the socket's user (own personal · any
+  shared/system · role dashboards for the user's roles). The single view rule,
+  shared by the list page and the builder so the two never disagree.
+  """
+  @spec viewable_by?(map(), Phoenix.LiveView.Socket.t()) :: boolean()
+  def viewable_by?(dashboard, socket) do
+    Dashboards.visible_to?(dashboard, actor_uuid(socket), user_role_uuids(socket))
+  end
+
+  @doc """
+  Whether `actor_uuid` may manage (edit/delete) `dashboard`: own personal ones,
+  or any shared/role one (the admin section is already owner/admin-gated). Takes
+  the actor uuid so socket callers (`actor_uuid(socket)`) and render-side
+  callers (the current-user uuid) share one rule — replacing the former
+  `can_delete?` / `deletable?` / `can_manage?` triplet.
+  """
+  @spec manageable_by?(map(), String.t() | nil) :: boolean()
+  def manageable_by?(%{scope: "personal"} = dashboard, actor_uuid),
+    do: dashboard.owner_user_uuid == actor_uuid
+
+  def manageable_by?(_dashboard, _actor_uuid), do: true
 
   @doc "All roles (for pickers); `[]` when the roles API is unavailable."
   @spec list_roles() :: [struct()]

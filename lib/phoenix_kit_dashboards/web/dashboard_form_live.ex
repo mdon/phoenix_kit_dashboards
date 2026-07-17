@@ -15,7 +15,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
   require Logger
 
   import PhoenixKitDashboards.Web.Helpers,
-    only: [actor_uuid: 1, actor_opts: 1, list_roles: 0]
+    only: [actor_uuid: 1, actor_opts: 1, list_roles: 0, manageable_by?: 2]
 
   alias PhoenixKitDashboards.Dashboards
   alias PhoenixKitDashboards.Paths
@@ -42,7 +42,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
 
   defp load_dashboard(socket, uuid) do
     with %Dashboard{} = dashboard <- uuid && Dashboards.get(uuid),
-         true <- can_manage?(dashboard, socket) do
+         true <- manageable_by?(dashboard, actor_uuid(socket)) do
       {:noreply,
        socket
        |> assign(:dashboard, dashboard)
@@ -113,7 +113,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
     # this form sat open; fail closed like a fresh load would.
     fresh = Dashboards.get(dashboard.uuid)
 
-    if is_nil(fresh) or not can_manage?(fresh, socket) do
+    if is_nil(fresh) or not manageable_by?(fresh, actor_uuid(socket)) do
       {:noreply,
        socket
        |> put_flash(:error, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard not found."))
@@ -165,13 +165,6 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
 
   defp scope_attrs(_params, socket),
     do: %{scope: "personal", owner_user_uuid: actor_uuid(socket), role_uuid: nil}
-
-  # Manage rule shared with the list page: own personal dashboards; any admin
-  # here can manage shared/role ones (the admin section is already gated).
-  defp can_manage?(%{scope: "personal"} = dashboard, socket),
-    do: dashboard.owner_user_uuid == actor_uuid(socket)
-
-  defp can_manage?(_dashboard, _socket), do: true
 
   # Role-scoped dashboards are HIDDEN for now (they were briefly offered in the
   # old create modal, 2026-07-08). The backend keeps full support — existing

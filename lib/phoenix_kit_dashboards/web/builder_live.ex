@@ -48,9 +48,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   import PhoenixKitDashboards.Web.Helpers,
     only: [
-      actor_uuid: 1,
+      viewable_by?: 2,
       actor_opts: 1,
-      user_role_uuids: 1,
       scope_label: 1,
       translate_catalog: 1
     ]
@@ -105,7 +104,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
          |> push_navigate(to: Paths.index())}
 
       dashboard ->
-        if can_view?(dashboard, socket) do
+        if viewable_by?(dashboard, socket) do
           {:noreply,
            socket
            |> assign(:dashboard, dashboard)
@@ -168,7 +167,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
          |> push_navigate(to: Paths.index())}
 
       dashboard ->
-        if can_view?(dashboard, socket) do
+        if viewable_by?(dashboard, socket) do
           socket = assign(socket, :dashboard, dashboard)
           do_handle_event(event, params, ensure_active_layout(socket))
         else
@@ -657,7 +656,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   @impl true
   def handle_info({:dashboard_updated, dashboard}, socket) do
     if dashboard.uuid == socket.assigns.dashboard.uuid do
-      if can_view?(dashboard, socket) do
+      if viewable_by?(dashboard, socket) do
         {:noreply,
          socket
          |> assign(:dashboard, dashboard)
@@ -885,10 +884,6 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   defp flash_sortable(socket, moved_id, status) do
     push_event(socket, "sortable:flash", %{uuid: moved_id, status: status})
-  end
-
-  defp can_view?(dashboard, socket) do
-    Dashboards.visible_to?(dashboard, actor_uuid(socket), user_role_uuids(socket))
   end
 
   defp settings_instance_data(dashboard, instance_id) do

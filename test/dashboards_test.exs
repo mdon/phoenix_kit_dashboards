@@ -273,14 +273,13 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert_activity_logged("dashboard.widget_removed", resource_uuid: dashboard.uuid)
     end
 
-    test "update_widget_settings replaces a single instance's settings", %{dashboard: dashboard} do
+    test "configure_widget replaces a single instance's settings", %{dashboard: dashboard} do
       {:ok, with_widget} = Dashboards.add_widget(dashboard, "core.note")
       [%{"id" => id}] = with_widget.layout
 
       assert {:ok, updated} =
-               Dashboards.update_widget_settings(with_widget, id, %{
-                 "title" => "Hi",
-                 "body" => "x"
+               Dashboards.configure_widget(with_widget, id, %{
+                 settings: %{"title" => "Hi", "body" => "x"}
                })
 
       assert [%{"settings" => %{"title" => "Hi", "body" => "x"}}] = updated.layout

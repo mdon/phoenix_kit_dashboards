@@ -82,9 +82,12 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   @doc """
   Return the user's default personal dashboard, creating an empty one on first
-  access. This is the page shown at the module's landing route.
+  access. Host-facing helper for a "default dashboard" landing page — the
+  built-in module lists dashboards rather than opening one, so nothing in this
+  package calls it; it's public API for hosts that want the get-or-create-default
+  pattern.
   """
-  @spec get_or_create_default(user_uuid :: String.t()) :: Dashboard.t()
+  @spec get_or_create_default(user_uuid :: String.t()) :: Dashboard.t() | nil
   def get_or_create_default(user_uuid) when is_binary(user_uuid) do
     # Ordered so a duplicate default (a rare concurrent-first-access race — no
     # unique index guards is_default) resolves to the SAME row on every read.
@@ -97,18 +100,24 @@ defmodule PhoenixKitDashboards.Dashboards do
 
     case repo().one(query) do
       nil ->
-        {:ok, dashboard} =
-          create(
-            %{
-              title: "My Dashboard",
-              scope: "personal",
-              owner_user_uuid: user_uuid,
-              is_default: true
-            },
-            actor_uuid: user_uuid
-          )
+        case create(
+               %{
+                 title: "My Dashboard",
+                 scope: "personal",
+                 owner_user_uuid: user_uuid,
+                 is_default: true
+               },
+               actor_uuid: user_uuid
+             ) do
+          {:ok, dashboard} ->
+            dashboard
 
-        dashboard
+          # A create error here is a lost concurrent first-access race (no unique
+          # index on is_default) — the winner's row now satisfies the query. A
+          # genuine DB failure returns nil rather than raising a MatchError.
+          {:error, _} ->
+            repo().one(query)
+        end
 
       dashboard ->
         dashboard
@@ -562,8 +571,13 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   @doc """
-  Show/hide a grid widget on `bp` (so smaller screens can drop non-essentials),
-  A layout tweak — not activity-logged.
+  Show/hide a grid widget on `bp` (so a layout can drop non-essentials). A layout
+  tweak — not activity-logged.
+
+  Host-facing: the render path fully supports hidden widgets (they keep their
+  cells and the builder dims them; `resolve_items/3` `visible: true` filters
+  them for the runtime), but the built-in builder ships no hide toggle yet — a
+  host wires this setter (with `resolve_hidden?/3`) to its own UI.
   """
   @spec hide_widget(Dashboard.t(), instance_id :: String.t(), String.t(), boolean()) ::
           {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
@@ -884,7 +898,10 @@ defmodule PhoenixKitDashboards.Dashboards do
     end
   end
 
-  @doc "Whether a widget is currently hidden on `bp` (stored or derived)."
+  @doc """
+  Whether a widget is currently hidden on `bp` (stored or derived). The read
+  counterpart to `hide_widget/4` — host-facing (see that function's note).
+  """
   @spec resolve_hidden?(Dashboard.t(), instance_id :: String.t(), String.t()) :: boolean()
   def resolve_hidden?(%Dashboard{} = dashboard, id, bp) do
     case resolve_placement(dashboard, id, bp) do
@@ -1031,13 +1048,6 @@ defmodule PhoenixKitDashboards.Dashboards do
     dashboard
     |> save_layout(layout)
     |> log_on_ok("dashboard.widget_removed", opts, %{"instance_id" => instance_id})
-  end
-
-  @doc "Replace the settings map of a single widget instance."
-  @spec update_widget_settings(Dashboard.t(), instance_id :: String.t(), map(), keyword()) ::
-          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
-  def update_widget_settings(%Dashboard{} = dashboard, instance_id, settings, opts \\ []) do
-    configure_widget(dashboard, instance_id, %{settings: settings}, opts)
   end
 
   @doc """
