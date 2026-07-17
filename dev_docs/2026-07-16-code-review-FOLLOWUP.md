@@ -114,16 +114,20 @@ Two dedup moves, both behavior-identical:
   / `delete_layout` / `set_grid_dims`) stay with the CAS `persist`.
 - **Packer.** The `first_free(occupied, …) || {0, below_all(occupied)}` fallback
   was respelled in three places (`new_instance`, `resolve_designed`,
-  `Grid.compact`). New `Grid.slot/5` (one-rectangle drop) + `Grid.pack/4` (seeded
-  list pack, writes `x/y/w/h`); `compact/3` is now `pack(…, [], …)`,
-  `resolve_designed` packs the order-only widgets around the placed ones via
-  `pack/4`, `new_instance` seeds via `slot/5`. No caller feeds `h > rows`, so the
-  unified `h`-clamp is a no-op and compact's subset-match tests are unaffected.
-  `dashboards.ex` **1503 → 1459**. (commit `aa8319a`)
+  `Grid.compact`). New `Grid.slot/5` (one-rectangle drop, shared by all three) +
+  `Grid.pack/4` (seeded list pack onto a pre-occupied set, writes `x/y/w/h`);
+  `resolve_designed` packs the order-only widgets around the already-placed ones
+  via `pack/4`, `new_instance` seeds via `slot/5`. `Grid.compact/3` keeps its own
+  fresh-grid loop (floors `h` to 1 for the placement scan but **does not** write
+  `h` back) — it is deliberately **not** `pack(…, [], …)` because it repacks
+  already-stored placements and must not row-clamp a caller's legacy `h`
+  (see the round-2 regression below, which corrected an earlier attempt that
+  folded the two). `dashboards.ex` **1503 → 1459**. (commit `aa8319a`, corrected
+  in `a417e37`)
 
 ### #13 (deep) / #7 — JS hook dedup + JS geometry tests — FIXED
 The shared pure geometry (`rectsOverlap` / `fitSpan`) is factored out and covered
-by a Node test harness (`test/js/geom.test.mjs`, run via `node --test`) that pins
+by a Node test harness (`test/js/geom.test.cjs`, run via `node --test`) that pins
 it against `Grid.fit_size/8`'s cell math — the repo now has a JS test runner for
 the pure layer. The drag/resize DOM plumbing stays hook-local (browser-verified),
 so the extraction touches only the pure functions the review called out. (commit
