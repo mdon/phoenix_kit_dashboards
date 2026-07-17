@@ -70,7 +70,7 @@ defmodule PhoenixKitDashboards.GridTest do
              ] = packed
     end
 
-    test "clamps a span wider than the target columns (tier derivation)" do
+    test "clamps a span wider than the target columns (layout derivation)" do
       assert [%{"x" => 0, "y" => 0, "w" => 4}] = Grid.compact([%{"w" => 10, "h" => 2}], 4)
     end
 

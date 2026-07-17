@@ -542,7 +542,7 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       )
     end
 
-    test "add_widget_at clamps into the tier and refuses an occupied cell", %{
+    test "add_widget_at clamps into the layout and refuses an occupied cell", %{
       dashboard: d,
       id: id
     } do
