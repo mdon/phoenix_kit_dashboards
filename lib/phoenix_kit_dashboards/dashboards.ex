@@ -19,14 +19,14 @@ defmodule PhoenixKitDashboards.Dashboards do
   alias PhoenixKitDashboards.Layout
   alias PhoenixKitDashboards.Registry
   alias PhoenixKitDashboards.Schemas.Dashboard
+  alias PhoenixKitDashboards.Sizing
   alias PhoenixKitDashboards.Widget
 
-  # Free/pixel-canvas widget size bounds (px).
-  @free_min_px 60
-  @free_max_px 4000
-  # Position bound: far past any real canvas, but crafted 1e9 coords must not
-  # persist (the fit hook would size a canvas the browser can't survive).
-  @free_max_pos 20_000
+  # Free/pixel-canvas widget bounds (px) — the values live in Lattice, the one
+  # home for geometry constants.
+  @free_min_px Lattice.free_min_px()
+  @free_max_px Lattice.free_max_px()
+  @free_max_pos Lattice.free_max_pos()
 
   # px per lattice unit when seeding a new widget's pixel-canvas geometry from
   # its span (the lattice cell is 25px, so the pixel seed mirrors the grid).
@@ -533,7 +533,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   defp resize_instance(inst, bp, w, h, others, cols, rows) do
-    bounds = size_bounds(inst, bp)
+    bounds = Sizing.bounds(inst, bp)
     placement = Layout.placement(inst, bp)
 
     case {placement["x"], placement["y"]} do
@@ -843,8 +843,8 @@ defmodule PhoenixKitDashboards.Dashboards do
     |> resolve_items(layout_id)
     |> Enum.map(fn {_item, p} ->
       case dim do
-        :cols -> if is_integer(p["x"]), do: p["x"] + (p["w"] || 1), else: 0
-        :rows -> if is_integer(p["y"]), do: p["y"] + (p["h"] || 1), else: 0
+        :cols -> if is_integer(p["x"]), do: p["x"] + Lattice.to_int(p["w"], 1), else: 0
+        :rows -> if is_integer(p["y"]), do: p["y"] + Lattice.to_int(p["h"], 1), else: 0
       end
     end)
     |> Enum.max(fn -> 0 end)
@@ -973,7 +973,7 @@ defmodule PhoenixKitDashboards.Dashboards do
           # same growth configure_widget applies for instance-level switches.
           inst = Layout.put_placement(inst, bp, %{"view" => view})
           layout = swap_item(dashboard.layout, instance_id, inst)
-          {min, _max} = size_bounds(inst, bp)
+          {min, _max} = Sizing.bounds(inst, bp)
           layout = swap_item(layout, instance_id, grow_on_tier(dashboard, inst, bp, min, layout))
           save_layout(dashboard, layout)
         else
@@ -1138,7 +1138,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   defp grow_all_tiers(dashboard, item, layout) do
     # Per-layout: each layout may show a different view with its own minimum.
     Enum.reduce(Map.keys(item["bp"] || %{}), item, fn bp, item ->
-      {min, _max} = size_bounds(item, bp)
+      {min, _max} = Sizing.bounds(item, bp)
       grow_on_tier(dashboard, item, bp, min, layout)
     end)
   end
@@ -1313,8 +1313,8 @@ defmodule PhoenixKitDashboards.Dashboards do
       unplaced
       |> Enum.sort_by(fn {_item, p} -> p["pos"] end)
       |> Enum.map_reduce(Enum.map(placed, fn {_i, p} -> p end), fn {item, p}, occupied ->
-        w = p["w"] |> max(1) |> min(cols)
-        h = p["h"] |> max(1) |> min(rows)
+        w = p["w"] |> Lattice.to_int(1) |> max(1) |> min(cols)
+        h = p["h"] |> Lattice.to_int(1) |> max(1) |> min(rows)
         {x, y} = Grid.first_free(occupied, w, h, cols, rows) || {0, Grid.below_all(occupied)}
         p2 = Map.merge(p, %{"x" => x, "y" => y, "w" => w, "h" => h})
         {{item, p2}, [p2 | occupied]}
@@ -1389,31 +1389,10 @@ defmodule PhoenixKitDashboards.Dashboards do
     |> persist()
   end
 
-  # Min/max span bounds for an INSTANCE — the min comes from its selected view
-  # when that view declares one (`Widget.min_size_for/2`; an analog clock has a
-  # squarer floor than a text one). The per-instance `min_override` drops the
-  # floor to 1x1: minimums are RECOMMENDATIONS (content renders degraded below
-  # them), and a user cramming a dense dashboard may opt out. Falls back to
-  # sane defaults when the type is unknown (a stale instance whose provider was
-  # uninstalled).
-  defp size_bounds(item, bp) do
-    case Registry.get(item["widget_key"]) do
-      %Widget{} = widget -> {instance_min(item, bp, widget), widget.max_size}
-      _ -> {%{w: 1, h: 1}, %{w: Lattice.max_dim(), h: Lattice.max_dim()}}
-    end
-  end
-
-  defp instance_min(%{"min_override" => true}, _bp, _widget), do: %{w: 1, h: 1}
-  defp instance_min(item, bp, widget), do: Widget.min_size_for(widget, Layout.view(item, bp))
-
-  defp clamp(value, lo, hi) when is_integer(value), do: value |> max(lo) |> min(hi)
-  defp clamp(_value, lo, _hi), do: lo
-
-  # Coerce a stored geometry value to an integer (tampered/legacy JSONB may
-  # carry a string or float where an int is expected).
-  defp int(v, _default) when is_integer(v), do: v
-  defp int(v, _default) when is_float(v), do: trunc(v)
-  defp int(_v, default), do: default
+  # Clamp + integer coercion delegate to the single Lattice implementation (was
+  # a divergent local copy — see Sizing / Lattice for the consolidation).
+  defp clamp(value, lo, hi), do: Lattice.clamp(value, lo, hi)
+  defp int(v, default), do: Lattice.to_int(v, default)
 
   # Log a business-level activity on the {:ok, dashboard} branch only, passing
   # through the original result. Guarded + rescued so a logging failure never

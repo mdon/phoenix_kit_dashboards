@@ -321,5 +321,5 @@ defmodule PhoenixKitDashboards.Widget do
     }
   end
 
-  defp clamp(value, lo, hi), do: value |> max(lo) |> min(hi)
+  defp clamp(value, lo, hi), do: Lattice.clamp(value, lo, hi)
 end

@@ -17,8 +17,12 @@ defmodule PhoenixKitDashboards.Grid do
       neighbour or the grid edge, never onto another widget.
 
   Everything is integer cell math on plain string-keyed placement maps
-  (`%{"x" => _, "y" => _, "w" => _, "h" => _}`) — no DOM, no DB.
+  (`%{"x" => _, "y" => _, "w" => _, "h" => _}`) — no DOM, no DB. Stored `w`/`h`
+  are coerced through `Lattice.to_int/2` before arithmetic, so a tampered/legacy
+  JSONB span carrying a string or float can't raise `ArithmeticError`.
   """
+
+  alias PhoenixKitDashboards.Lattice
 
   # The HARD row bound: placement scans never go past it and hostile
   # coordinates clamp to it. Matches the lattice dimension cap (a layout's
@@ -39,8 +43,8 @@ defmodule PhoenixKitDashboards.Grid do
     Enum.any?(others, fn p ->
       case {p["x"], p["y"]} do
         {ox, oy} when is_integer(ox) and is_integer(oy) ->
-          ow = p["w"] || 1
-          oh = p["h"] || 1
+          ow = Lattice.to_int(p["w"], 1)
+          oh = Lattice.to_int(p["h"], 1)
           x < ox + ow and ox < x + w and y < oy + oh and oy < y + h
 
         _ ->
@@ -80,7 +84,7 @@ defmodule PhoenixKitDashboards.Grid do
     others
     |> Enum.map(fn p ->
       case p["y"] do
-        y when is_integer(y) -> y + (p["h"] || 1)
+        y when is_integer(y) -> y + Lattice.to_int(p["h"], 1)
         _ -> 0
       end
     end)
@@ -102,8 +106,8 @@ defmodule PhoenixKitDashboards.Grid do
   def compact(placements, cols, rows \\ @max_rows) do
     {packed, _occupied} =
       Enum.map_reduce(placements, [], fn p, occupied ->
-        w = min(max(p["w"] || 1, 1), cols)
-        h = max(p["h"] || 1, 1)
+        w = min(max(Lattice.to_int(p["w"], 1), 1), cols)
+        h = max(Lattice.to_int(p["h"], 1), 1)
 
         {x, y} = first_free(occupied, w, h, cols, rows) || {0, below_all(occupied)}
         placed = p |> Map.put("x", x) |> Map.put("y", y) |> Map.put("w", w)

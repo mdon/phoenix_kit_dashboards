@@ -62,14 +62,16 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   alias PhoenixKitDashboards.Paths
   alias PhoenixKitDashboards.Registry
   alias PhoenixKitDashboards.Schemas.Dashboard
+  alias PhoenixKitDashboards.Sizing
   alias PhoenixKitDashboards.Widget
 
   # How often the host checks whether any live widget is due for a refresh.
   @refresh_tick_ms 1000
 
-  # Pixel-canvas widget size bounds (mirror the context's px clamps).
-  @free_min_px 60
-  @free_max_px 4000
+  # Pixel-canvas widget size bounds (px) — sourced from Lattice, the one home for
+  # geometry constants (same values the context clamps to).
+  @free_min_px Lattice.free_min_px()
+  @free_max_px Lattice.free_max_px()
 
   @impl true
   def mount(params, _session, socket) do
@@ -1543,7 +1545,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   # placement span + the widget type's min/max clamped to the active layout's
   # columns. Pixel: the default-bp span (unused by the pixel resize, which uses px).
   defp card_limits(%{mode: "grid", inst: inst, placement: placement, cols: cols} = assigns) do
-    {min, max} = widget_size_bounds(inst, assigns.active_layout)
+    {min, max} = Sizing.bounds(inst, assigns.active_layout)
     cols = cols || 12
     p = placement || %{}
 
@@ -1572,24 +1574,10 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     p = Layout.placement(inst, bp)
     w = p["w"] |> to_int(4) |> clamp(1, cols)
     h = p["h"] |> to_int(2) |> max(1)
-    {min, max} = widget_size_bounds(inst, bp)
+    {min, max} = Sizing.bounds(inst, bp)
 
     %{w: w, h: h, min_w: min(min.w, cols), max_w: min(max.w, cols), min_h: min.h, max_h: max.h}
   end
-
-  # Min/max span for an instance — the min follows the LAYOUT's resolved view
-  # when that view declares one (mirrors the context's clamp); falls back to a
-  # permissive range for an instance whose provider is no longer installed.
-  defp widget_size_bounds(inst, bp) do
-    case Registry.get(inst["widget_key"]) do
-      %Widget{} = widget -> {instance_min(inst, bp, widget), widget.max_size}
-      _ -> {%{w: 1, h: 1}, %{w: Lattice.max_dim(), h: Lattice.max_dim()}}
-    end
-  end
-
-  # Mirrors the context: the per-instance override drops the recommended floor.
-  defp instance_min(%{"min_override" => true}, _bp, _widget), do: %{w: 1, h: 1}
-  defp instance_min(inst, bp, widget), do: Widget.min_size_for(widget, Layout.view(inst, bp))
 
   # Grid mode: explicit cell placement — `x`/`y` (0-based, from the resolved
   # placement, which always carries them) anchor the card, spanning `w`×`h`.
@@ -1648,8 +1636,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     end)
   end
 
-  defp to_int(v, _default) when is_integer(v), do: v
-  defp to_int(_v, default), do: default
+  # Stored-geometry coercion delegates to the single Lattice implementation —
+  # now handles floats/strings from legacy JSONB (was integer-only, so a float
+  # silently rendered as the default). `to_i/1` below is the distinct
+  # event-param coercion (rounds, default 0) for live drag/resize payloads.
+  defp to_int(v, default), do: Lattice.to_int(v, default)
 
   defp to_i(v) when is_integer(v), do: v
   defp to_i(v) when is_float(v), do: round(v)
@@ -1663,7 +1654,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   defp to_i(_v), do: 0
 
-  defp clamp(value, lo, hi), do: value |> max(lo) |> min(hi)
+  defp clamp(value, lo, hi), do: Lattice.clamp(value, lo, hi)
 
   # Resolve the widget type for an instance and render its LiveComponent. The
   # widget's `size` is the placement for the tier being viewed (so density-aware
