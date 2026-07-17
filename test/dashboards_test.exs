@@ -2,6 +2,7 @@ defmodule PhoenixKitDashboards.DashboardsTest do
   use PhoenixKitDashboards.DataCase, async: true
 
   alias PhoenixKitDashboards.Dashboards
+  alias PhoenixKitDashboards.Lattice
   alias PhoenixKitDashboards.Layout
   alias PhoenixKitDashboards.Schemas.Dashboard
 
@@ -167,24 +168,62 @@ defmodule PhoenixKitDashboards.DashboardsTest do
 
       {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
       [%{"id" => id}] = dashboard.layout
+      fw = Layout.pixel(hd(dashboard.layout))["fw"]
 
-      # A crafted coordinate on the SOLE widget clamps to one screen (4000px),
-      # not the 20000 hard cap — a single move_widget_to can't balloon the
-      # shared canvas for every viewer (review finding #2).
+      # A crafted coordinate clamps to one screen (4000px) past the widget's own
+      # edge — not the 20000 hard cap — so a single move_widget_to can't balloon
+      # the shared canvas for every viewer (review finding #2).
       {:ok, dashboard} = Dashboards.place_widget_px(dashboard, id, 1_000_000_000, -50)
       note = hd(dashboard.layout)
-      assert Layout.pixel(note)["fx"] == 4000
+      assert Layout.pixel(note)["fx"] == fw + 4000
       assert Layout.pixel(note)["fy"] == 0
+      assert Layout.pixel(note)["fx"] < 20_000
 
-      # A newly-added widget is bounded to one screen past the furthest existing
-      # edge — well under the 20000 hard cap, so the canvas can't be ballooned.
+      # A newly-added widget is likewise bounded, well under the 20000 cap.
       {:ok, dashboard} =
         Dashboards.add_widget_px(dashboard, "core.clock", 999_999_999, 999_999_999)
 
       clock = Enum.find(dashboard.layout, &(&1["widget_key"] == "core.clock"))
-      note_right = Layout.pixel(note)["fx"] + Layout.pixel(note)["fw"]
-      assert Layout.pixel(clock)["fx"] <= note_right + 4000
       assert Layout.pixel(clock)["fx"] < 20_000
+    end
+
+    test "a widget parked far out is NOT yanked back on a later place (peers near origin)" do
+      # Regression for the first cut of the #2 fix: computing the bound from
+      # OTHER widgets only pulled a legitimately far-out widget backward on any
+      # later place (a micro-drag or a settings re-save that resubmits its fx).
+      {:ok, dashboard} =
+        Dashboards.create(%{title: "Px", scope: "system", config: %{"type" => "pixel"}})
+
+      {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
+      [%{"id" => id}] = dashboard.layout
+
+      # Walk it outward across two moves (each ≤ one screen past its own edge).
+      {:ok, dashboard} = Dashboards.place_widget_px(dashboard, id, 1_000_000, 0)
+      far1 = Layout.pixel(hd(dashboard.layout))["fx"]
+      {:ok, dashboard} = Dashboards.place_widget_px(dashboard, id, 1_000_000, 0)
+      far2 = Layout.pixel(hd(dashboard.layout))["fx"]
+      assert far2 > far1
+
+      # Re-saving the SAME current fx keeps it — no rubber-band back to ~4000.
+      {:ok, dashboard} = Dashboards.place_widget_px(dashboard, id, far2, 0)
+      assert Layout.pixel(hd(dashboard.layout))["fx"] == far2
+    end
+
+    test "grid dims stay capped at the lattice bound for a tampered/huge stored value" do
+      # A tampered huge stored dim must not feed design_width/height a giant
+      # canvas — layouts/1 clamps cols/rows to [min_dim, max_dim] on read.
+      {:ok, dashboard} = Dashboards.create(%{title: "G", scope: "system"})
+
+      tampered = %{
+        dashboard
+        | config:
+            Map.put(dashboard.config, "layouts", [
+              %{"id" => "l1", "name" => "L", "cols" => 9_999_999, "rows" => 9_999_999}
+            ])
+      }
+
+      assert Dashboards.grid_cols(tampered, "l1") == Lattice.max_dim()
+      assert Dashboards.grid_rows(tampered, "l1") == Lattice.max_dim()
     end
   end
 
@@ -284,6 +323,16 @@ defmodule PhoenixKitDashboards.DashboardsTest do
 
       assert [%{"settings" => %{"title" => "Hi", "body" => "x"}}] = updated.layout
       assert_activity_logged("dashboard.widget_configured", resource_uuid: dashboard.uuid)
+    end
+
+    test "update_widget_settings alias delegates to configure_widget", %{dashboard: dashboard} do
+      {:ok, with_widget} = Dashboards.add_widget(dashboard, "core.note")
+      [%{"id" => id}] = with_widget.layout
+
+      assert {:ok, updated} =
+               Dashboards.update_widget_settings(with_widget, id, %{"title" => "Aliased"})
+
+      assert [%{"settings" => %{"title" => "Aliased"}}] = updated.layout
     end
 
     test "save_layout persists positions but is NOT logged (drag hot path)", %{

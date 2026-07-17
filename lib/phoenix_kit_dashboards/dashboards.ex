@@ -352,9 +352,9 @@ defmodule PhoenixKitDashboards.Dashboards do
       %Widget{} = widget ->
         # Same one-screen-past-existing-content bound as place_widget_px — the
         # new instance isn't in dashboard.layout yet, so every existing widget
-        # counts (nil id matches none).
-        max_x = pixel_bound(dashboard, nil, :x)
-        max_y = pixel_bound(dashboard, nil, :y)
+        # counts.
+        max_x = pixel_bound(dashboard, :x)
+        max_y = pixel_bound(dashboard, :y)
 
         instance =
           dashboard
@@ -777,6 +777,11 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   defp drop_layout_entry(inst, _id), do: inst
 
+  # NOTE: grid_cols/grid_rows read through get_layout → layouts/1, which already
+  # clamps cols/rows to the lattice bounds [min_dim, max_dim] (a tampered/huge or
+  # non-integer stored dim can't reach design_width/height uncapped). Only the
+  # PIXEL read path (BuilderLive.free_geometry, via Layout.pixel) needed a new
+  # read-side clamp — Layout.pixel doesn't bound fw/fh.
   @doc "The column count of a layout (default entry's when the id is unknown)."
   @spec grid_cols(Dashboard.t(), String.t()) :: pos_integer()
   def grid_cols(%Dashboard{} = dashboard, layout_id) do
@@ -862,8 +867,8 @@ defmodule PhoenixKitDashboards.Dashboards do
     |> resolve_items(layout_id)
     |> Enum.map(fn {_item, p} ->
       case dim do
-        :cols -> if is_integer(p["x"]), do: p["x"] + Lattice.to_int(p["w"], 1), else: 0
-        :rows -> if is_integer(p["y"]), do: p["y"] + Lattice.to_int(p["h"], 1), else: 0
+        :cols -> if is_integer(p["x"]), do: p["x"] + max(Lattice.to_int(p["w"], 1), 1), else: 0
+        :rows -> if is_integer(p["y"]), do: p["y"] + max(Lattice.to_int(p["h"], 1), 1), else: 0
       end
     end)
     |> Enum.max(fn -> 0 end)
@@ -927,8 +932,8 @@ defmodule PhoenixKitDashboards.Dashboards do
   @spec place_widget_px(Dashboard.t(), instance_id :: String.t(), integer(), integer()) ::
           {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def place_widget_px(%Dashboard{} = dashboard, instance_id, fx, fy) do
-    max_x = pixel_bound(dashboard, instance_id, :x)
-    max_y = pixel_bound(dashboard, instance_id, :y)
+    max_x = pixel_bound(dashboard, :x)
+    max_y = pixel_bound(dashboard, :y)
 
     update_item(dashboard, instance_id, fn inst ->
       Layout.put_pixel(inst, %{
@@ -939,12 +944,14 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   # The furthest a widget may be positioned on an axis: one screen (@free_max_px)
-  # past the furthest edge of the OTHER widgets, capped at @free_max_pos. Lets the
-  # canvas grow a screenful per move while blocking a single-event balloon.
-  defp pixel_bound(dashboard, instance_id, axis) do
+  # past the furthest EXISTING widget edge, capped at @free_max_pos. Includes the
+  # widget being moved (its own current edge counts) so a widget already parked
+  # far out isn't yanked back when peers move nearer — a micro-drag or a settings
+  # re-save that resubmits its current fx/fy keeps it in place. Lets the canvas
+  # grow a screenful per move while blocking a single-event balloon.
+  defp pixel_bound(dashboard, axis) do
     extent =
       dashboard.layout
-      |> Enum.reject(&(&1["id"] == instance_id))
       |> Enum.map(fn inst ->
         px = Layout.pixel(inst)
 
@@ -955,7 +962,10 @@ defmodule PhoenixKitDashboards.Dashboards do
       end)
       |> Enum.max(fn -> 0 end)
 
-    min(extent + @free_max_px, @free_max_pos)
+    # Floor the extent at 0 first — a tampered/legacy negative stored fx/fw could
+    # make the extent (and so the upper bound) negative, and clamp(fx, 0, neg)
+    # would then persist a negative position, violating the >= 0 invariant.
+    min(max(extent, 0) + @free_max_px, @free_max_pos)
   end
 
   @doc """
@@ -1053,6 +1063,17 @@ defmodule PhoenixKitDashboards.Dashboards do
     dashboard
     |> save_layout(layout)
     |> log_on_ok("dashboard.widget_removed", opts, %{"instance_id" => instance_id})
+  end
+
+  @doc """
+  Replace a single widget instance's settings map. Thin convenience alias for
+  `configure_widget/4` (the canonical config API) — kept as public API so host
+  code from earlier releases keeps working.
+  """
+  @spec update_widget_settings(Dashboard.t(), instance_id :: String.t(), map(), keyword()) ::
+          {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
+  def update_widget_settings(%Dashboard{} = dashboard, instance_id, settings, opts \\ []) do
+    configure_widget(dashboard, instance_id, %{settings: settings}, opts)
   end
 
   @doc """

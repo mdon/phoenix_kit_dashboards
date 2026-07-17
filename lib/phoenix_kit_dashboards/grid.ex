@@ -43,8 +43,11 @@ defmodule PhoenixKitDashboards.Grid do
     Enum.any?(others, fn p ->
       case {p["x"], p["y"]} do
         {ox, oy} when is_integer(ox) and is_integer(oy) ->
-          ow = Lattice.to_int(p["w"], 1)
-          oh = Lattice.to_int(p["h"], 1)
+          # Floor to 1 like rendering / compact — a stored "0"/negative span
+          # renders one cell wide, so collision must see at least one cell too
+          # (else a zero-width span lets another widget pack into the same cell).
+          ow = max(Lattice.to_int(p["w"], 1), 1)
+          oh = max(Lattice.to_int(p["h"], 1), 1)
           x < ox + ow and ox < x + w and y < oy + oh and oy < y + h
 
         _ ->
@@ -84,7 +87,7 @@ defmodule PhoenixKitDashboards.Grid do
     others
     |> Enum.map(fn p ->
       case p["y"] do
-        y when is_integer(y) -> y + Lattice.to_int(p["h"], 1)
+        y when is_integer(y) -> y + max(Lattice.to_int(p["h"], 1), 1)
         _ -> 0
       end
     end)

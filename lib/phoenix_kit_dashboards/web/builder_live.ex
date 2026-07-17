@@ -1609,12 +1609,16 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   # A widget's free-canvas geometry in px, read from its embedded `pixel` map
   # (seeded on add). `Layout.pixel/1` also falls back to legacy flat keys.
+  # Values are clamped on READ (not just on the write paths): a tampered/legacy
+  # huge stored coord — now that Lattice.to_int also parses numeric strings —
+  # must not size a canvas the fit hook can't render (positions cap at
+  # @free_max_pos, sizes at @free_max_px).
   defp free_geometry(inst) do
     px = Layout.pixel(inst)
-    fx = px["fx"] |> to_int(0) |> max(0)
-    fy = px["fy"] |> to_int(0) |> max(0)
-    fw = px["fw"] |> to_int(@free_min_px) |> max(@free_min_px)
-    fh = px["fh"] |> to_int(@free_min_px) |> max(@free_min_px)
+    fx = px["fx"] |> to_int(0) |> clamp(0, Lattice.free_max_pos())
+    fy = px["fy"] |> to_int(0) |> clamp(0, Lattice.free_max_pos())
+    fw = px["fw"] |> to_int(@free_min_px) |> clamp(@free_min_px, @free_max_px)
+    fh = px["fh"] |> to_int(@free_min_px) |> clamp(@free_min_px, @free_max_px)
     {fx, fy, fw, fh}
   end
 

@@ -34,9 +34,11 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
   def update(assigns, socket) do
     settings = assigns[:settings] || %{}
     # Defense in depth: the context filters settings to scalars, but a widget
-    # must never let a legacy/hostile non-binary value crash a later mount — so
-    # both title and body coerce to a binary.
-    title = string_or(Map.get(settings, "title"), "Note")
+    # must never let a legacy/hostile non-binary value crash a later mount.
+    # `title` keeps a non-string SCALAR (a numeric/boolean host-seeded value
+    # still renders as "42"/"true"); only a map/list (which HEEx can't render)
+    # falls back to the default. `body` drops any non-binary to "".
+    title = title_string(Map.get(settings, "title"))
     body = string_or(Map.get(settings, "body"), "")
 
     {:ok,
@@ -49,6 +51,11 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
 
   defp string_or(v, _default) when is_binary(v), do: v
   defp string_or(_v, default), do: default
+
+  defp title_string(v) when is_binary(v), do: v
+  defp title_string(v) when is_number(v), do: to_string(v)
+  defp title_string(v) when is_boolean(v), do: to_string(v)
+  defp title_string(_v), do: "Note"
 
   # CONTENT-AWARE type: the font size that lets the whole note fit its box,
   # in container-query units so it tracks the rendered size at any fit scale.

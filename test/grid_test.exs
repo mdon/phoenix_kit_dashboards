@@ -124,9 +124,19 @@ defmodule PhoenixKitDashboards.GridTest do
       assert Grid.collides?(2, 0, 1, 1, [%{"x" => 2, "y" => 0, "w" => nil, "h" => :bad}])
     end
 
-    test "below_all coerces a string/float height" do
+    test "below_all coerces a string/float height, flooring to 1" do
       assert Grid.below_all([%{"y" => 2, "h" => "3"}]) == 5
       assert Grid.below_all([%{"y" => 2, "h" => 3.7}]) == 5
+      # A "0"/negative height floors to 1 (renders one cell), so y=2 → 3.
+      assert Grid.below_all([%{"y" => 2, "h" => "0"}]) == 3
+    end
+
+    test "a zero/negative span is floored to 1 for collision (renders one cell)" do
+      # An explicit placement stored with "w" => "0" renders one cell wide, so
+      # collision must treat it as at least one cell — else a second widget
+      # could pack into the same cell (review re-pass, Codex).
+      assert Grid.collides?(0, 0, 1, 1, [%{"x" => 0, "y" => 0, "w" => "0", "h" => "0"}])
+      assert Grid.collides?(0, 0, 1, 1, [%{"x" => 0, "y" => 0, "w" => -5, "h" => -5}])
     end
 
     test "compact packs placements with string spans without crashing" do
