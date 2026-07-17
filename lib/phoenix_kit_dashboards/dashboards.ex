@@ -652,17 +652,19 @@ defmodule PhoenixKitDashboards.Dashboards do
       "rows" => source["rows"]
     }
 
-    # Seed: the source layout's resolved placements, compacted into the new
-    # grid in reading order (dims match, so this is a straight copy).
+    # Seed the new layout from the source's resolved placements, compacted into
+    # the new grid in reading order (dims match, so this is a straight copy).
+    # Resolve once — `resolve_items` packs the whole layout — and reuse for both
+    # the compaction input and the item→placement pairing.
+    resolved = resolve_items(dashboard, source["id"])
+
     seeded =
-      dashboard
-      |> resolve_items(source["id"])
+      resolved
       |> Enum.map(fn {_item, p} -> p end)
       |> Grid.compact(entry["cols"], entry["rows"])
 
     seeds =
-      dashboard
-      |> resolve_items(source["id"])
+      resolved
       |> Enum.zip(seeded)
       |> Map.new(fn {{item, _}, p} -> {item["id"], p} end)
 

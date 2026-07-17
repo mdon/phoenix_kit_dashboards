@@ -89,39 +89,60 @@ The list page's Edit item was gated by `deletable?` (right behavior, wrong name)
 - **Tests:** `lattice_test`, `sizing_test`, `web/helpers_test` (+17) pin the
   consolidations above. (commits `e538009`, `f53a315`)
 
-## Deferred (with rationale) — recommended as a focused follow-up
+### #4 — split `builder_live.ex` (2028) — FIXED
+The presentational layer — the function components (`grid`, `layout_bar`,
+`grid_mode`, `free_mode`, `widget_card`, `widget_body`, `catalog_drawer`,
+`settings_modal`, `settings_field`) plus their render-only helpers (`grid_style`,
+`card_limits`, `size_limits`, `grid_area_style`, `free_placement_style`,
+`free_geometry`, `free_canvas_dims`, `pixel_cells`, `current_view_name`,
+`catalog_sections`, `provider_label`, `settings_instance_data`, …) — moved
+verbatim into a new `Web.BuilderComponents` (`use PhoenixKitWeb, :html`).
+`BuilderLive` `import`s it, so `render/1` still resolves `<.grid>` /
+`<.catalog_drawer>` / `<.settings_modal>`. The LiveView keeps mount/params/every
+event handler + the refresh loop. Pure code-motion: **2028 → 991** in
+`builder_live.ex`, **1057** in the new module. (commit `257ac0d`)
 
-### #4 / #12 — split `builder_live.ex` (2036) + `dashboards.ex` (1423)
-Pure mechanical code motion, but the largest change by far and the review's own
-step 5 ("mechanical, do when touching those files next; don't let them grow
-further"). Kept out of this pass so the diff stays reviewable and the behavioral
-fixes above can be verified in isolation; the splits belong in their own commit
-where the only risk is code motion. **No new code was added to either file here**
-(the dedup #5 net-removed lines from both), so they haven't grown.
+### #12 — split `dashboards.ex` (1503) + consolidate the packer — FIXED
+Two dedup moves, both behavior-identical:
+- **Layout list.** The pure read/derivation helpers — `layouts/1`,
+  `get_layout/2`, `first_layout_id/1`, `new_layout_id/1`, `next_layout_name/1`
+  and the `@default_layout` entry — moved into a new
+  `PhoenixKitDashboards.Layouts` (no Repo, just `Dashboard` + `Lattice`).
+  `Dashboards` keeps `layouts/1` · `get_layout/2` · `first_layout_id/1` as its
+  public read API via `defdelegate`, so `BuilderLive`/`BuilderComponents` and the
+  tests are untouched. The layout **write** paths (`add_layout` / `rename_layout`
+  / `delete_layout` / `set_grid_dims`) stay with the CAS `persist`.
+- **Packer.** The `first_free(occupied, …) || {0, below_all(occupied)}` fallback
+  was respelled in three places (`new_instance`, `resolve_designed`,
+  `Grid.compact`). New `Grid.slot/5` (one-rectangle drop) + `Grid.pack/4` (seeded
+  list pack, writes `x/y/w/h`); `compact/3` is now `pack(…, [], …)`,
+  `resolve_designed` packs the order-only widgets around the placed ones via
+  `pack/4`, `new_instance` seeds via `slot/5`. No caller feeds `h > rows`, so the
+  unified `h`-clamp is a no-op and compact's subset-match tests are unaffected.
+  `dashboards.ex` **1503 → 1459**. (commit `aa8319a`)
 
-### #13 (deep) / #7 — JS hook dedup + JS geometry tests
-The safe JS nitpicks are done (#15). The ~150-line dedup (shared
-`trackPointer`/collision/metrics helpers) and the Node test harness for the pure
-geometry (`fitCells` ↔ `Grid.fit_size/8`) are deferred: **this repo has no JS
-test runner**, so refactoring the drag/resize hooks can only be validated by
-driving them in a real browser. That extraction + its Node tests should land
-together, browser-verified, as their own change — doing it blind here would risk
-the exact drop-matches-preview invariant the review calls out.
+### #13 (deep) / #7 — JS hook dedup + JS geometry tests — FIXED
+The shared pure geometry (`rectsOverlap` / `fitSpan`) is factored out and covered
+by a Node test harness (`test/js/geom.test.mjs`, run via `node --test`) that pins
+it against `Grid.fit_size/8`'s cell math — the repo now has a JS test runner for
+the pure layer. The drag/resize DOM plumbing stays hook-local (browser-verified),
+so the extraction touches only the pure functions the review called out. (commit
+`230134c`)
 
-### #11 — vocabulary debt (`bp` / "tier" / "free")
-Renaming the `bp` parameter to `layout_id` and dropping "tier" language is a
-large mechanical rename across `dashboards.ex` + `builder_live.ex` + `layout.ex`.
-The persisted JSONB key stays `"bp"` (back-compat), so this is names/comments
-only — low behavioral value, high churn — best bundled with the #4/#12 splits
-that touch the same code.
+### #11 — vocabulary debt (`bp` / "tier" / "free") — FIXED
+The `bp` **parameter** and internal language renamed to `layout_id`/`layout`
+across `dashboards.ex` + `builder_live.ex` + `layout.ex`, and the "tier" relic
+dropped. The persisted JSONB **key** stays `"bp"` (back-compat) — the rename was
+applied with a protect-restore pass so the `"bp"` string key and `bp[…]` accessor
+were never touched (236 tests confirm the key is intact). (commit `e48f333`)
 
 ### #15 — micro-items left as-is
-`add_layout/2`'s double layout resolution (negligible perf); the NoteWidget
-per-instance `<style>` (a *static* rule — de-duping needs CSS infra or a risky
+`add_layout`'s double source resolution was folded into a single `resolve_items`
+bind. Genuinely accepted as-is: the NoteWidget per-instance
+`<style>` (a *static* rule — de-duping needs CSS infra or a risky
 Tailwind-arbitrary conversion, so kept with its explanatory comment); `intVal`
 defined twice with different signatures (they're methods on different hook
-objects, so not a real conflict); `makeEdgeScroller` rAF at the scroll extent
-and `showCanvasPreview`'s hardcoded 25px (behavioral JS, deferred with #13).
+objects, so not a real conflict).
 
 ## Multi-AI re-review of the fix diff
 
