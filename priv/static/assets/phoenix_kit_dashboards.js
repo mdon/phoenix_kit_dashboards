@@ -6,11 +6,13 @@
 //
 // All hooks are progressive enhancement — both dashboard types stay operable
 // without JS via the Settings modal inputs:
-//   DashboardGridDrag  — grid cell placement (drag a widget to any free cell)
-//   DashboardFreeDrag  — pixel-canvas move (left/top px)
-//   DashboardResize    — corner resize (cells in grid, px in pixel mode)
-//   DashboardGridFit / DashboardFreeFit / DashboardFullscreen
-//                      — fit-scaling and fullscreen helpers
+//   DashboardGridDrag    — grid cell placement (drag a widget to any free cell)
+//   DashboardCatalogDrag — drag a widget type out of the catalog onto the canvas
+//   DashboardFreeDrag    — pixel-canvas move (left/top px)
+//   DashboardResize      — corner resize (cells in grid, px in pixel mode)
+//   DashboardGridFit / DashboardFreeFit / DashboardFitScreen / DashboardFullscreen
+//                        — fit-scaling, fit-to-screen, and fullscreen helpers
+//   DashboardVisibility  — reports viewport width so a dashboard mounts fitted
 window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
 (function () {
@@ -250,7 +252,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     maxRows() {
       var grid = document.getElementById("dashboard-grid");
       var v = grid && parseInt(grid.getAttribute("data-max-rows"), 10);
-      return v || 50;
+      return v || 36;
     },
 
     // CSS px for a span of `n` cells given per-cell stride + gap: n cells hold
@@ -1180,17 +1182,21 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
   };
 
   // `DashboardGridFit` — sizes the grid canvas into the pane. Standard 25px
-  // cells: per-axis stretch absorbs the last <=10% (a fitted screen fills
+  // cells: per-axis stretch absorbs the last <=4% (a fitted screen fills
   // exactly); otherwise the artboard shrinks to fit a smaller pane or floats
   // centered at natural size in a bigger one — never blown up. Editable at
   // any scale; re-fits on resize / fullscreen change (both fire the RO).
   window.PhoenixKitDashboardsHooks.DashboardGridFit = {
     mounted() {
       var self = this;
-      this._ro = new ResizeObserver(function () {
-        self.fit();
-      });
-      this._ro.observe(this.el);
+      // Guarded like DashboardFreeFit — the window `resize` listener below is the
+      // fallback where ResizeObserver is unavailable.
+      if (typeof ResizeObserver === "function") {
+        this._ro = new ResizeObserver(function () {
+          self.fit();
+        });
+        this._ro.observe(this.el);
+      }
       this._onResize = function () {
         self.fit();
       };
@@ -1210,7 +1216,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     // ONE SCREENFUL, NEVER SCROLLS. The design canvas (cols*25 x rows*25)
     // scales into the pane:
     //  - when the pane's shape roughly matches the layout's (per-axis scales
-    //    within ~10% of each other), scale each axis independently — the
+    //    within ~4% of each other), scale each axis independently — the
     //    board fills the pane edge-to-edge, cells go imperceptibly
     //    non-square, no orphan strip;
     //  - beyond that tolerance, uniform scale + letterbox: an intact
