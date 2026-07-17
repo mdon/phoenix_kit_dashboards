@@ -166,9 +166,38 @@ items — **all fixed and pinned** (commit `af9687c`):
 - **`update_widget_settings/4` removal was breaking** (Codex MED) — restored as
   a documented thin alias for `configure_widget/4`.
 
+## Multi-AI re-review of the deferred work (round 2)
+
+After the four deferred items landed, a second adversarial panel (Codex, Grok,
+Vibe — Gemini quota-exhausted, ZAI's CLI blocked on an `ANTHROPIC_API_KEY`
+precedence gotcha) reviewed the #4/#12/#13/#11 diffs specifically for behavior
+the refactor changed. **Unanimous, and correct:** the `Layouts` extraction (#12)
+and the `bp`→`layout_id` rename (#11) are behavior-preserving — the delegates
+keep every call site, the layout normalization is unchanged, and every persisted
+`"bp"` key/accessor is intact. All three independently caught **one** real
+regression in the packer consolidation and it is now fixed:
+
+- **`Grid.compact/3` unification silently reshaped oversized placements**
+  (Codex MED, Grok MED, Vibe HIGH). Folding `compact/3` into the seeded `pack/4`
+  made it row-clamp and rewrite a caller's stored `h`. `compact` repacks
+  *already-stored* placements for `reorder_widgets` / `add_layout`, and
+  `grid_materialized?/2` gates only on `x`/`y` — so a legacy/materialized span
+  with `h > rows` (e.g. a 4×4 layout holding `h: 8`) reached `compact`, which
+  now clamped it to `h: 4` and re-stacked the next widget at `y: 4` instead of
+  `y: 8`. **Fix:** `compact/3` keeps its own fresh-grid loop (floors `h` to 1,
+  never row-clamps, writes only `x`/`y`/`w` — its exact pre-refactor behavior);
+  only `resolve_designed`'s render-time packer uses `pack/4`. The genuinely
+  duplicated `first_free/5 || {0, below_all/1}` fallback is still shared as
+  `Grid.slot/5` across `compact`, `pack`, and `new_instance`. A `grid_test`
+  regression guard pins compact's height-preservation. (commit for this fix
+  below.)
+
+The panel raised no other regressions.
+
 ## Verification
 
 - `mix precommit` (via `PHOENIX_KIT_PATH=../phoenix_kit`): **clean** — compile
   (warnings-as-errors), `mix format`, `credo --strict`, dialyzer **0 errors**.
-- `mix test`: **236 tests, 0 failures** (212 baseline + 24 new).
+- `mix test`: **237 tests, 0 failures** (212 baseline + 25 new, incl. the
+  compact height-preservation regression guard from round 2).
 - `node --check` on the hook bundle: clean.

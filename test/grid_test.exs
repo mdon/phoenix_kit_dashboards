@@ -81,6 +81,18 @@ defmodule PhoenixKitDashboards.GridTest do
       packed = Grid.compact([%{"w" => 4, "h" => 4}, %{"w" => 4, "h" => 4}], 4, 4)
       assert [%{"x" => 0, "y" => 0}, %{"x" => 0, "y" => 4}] = packed
     end
+
+    test "preserves an explicit height that exceeds the rows (never silently shrinks it)" do
+      # A materialized/legacy placement can carry h > rows — grid_materialized?/2
+      # gates only on x/y, and resolve_designed passes explicit placements
+      # verbatim — so reorder_widgets/add_layout can feed such a span into
+      # compact. It must keep the height and stack the next widget below the FULL
+      # extent, never clamp it into the screenful. Regression guard: a shared
+      # pack/4 that row-clamps + rewrites h would place the second widget at y: 4
+      # and persist h: 4 here (caught by the multi-AI re-review of the #12 dedup).
+      packed = Grid.compact([%{"w" => 4, "h" => 8}, %{"w" => 4, "h" => 2}], 4, 4)
+      assert [%{"x" => 0, "y" => 0, "h" => 8}, %{"x" => 0, "y" => 8}] = packed
+    end
   end
 
   describe "fit_size/8" do
