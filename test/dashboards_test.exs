@@ -161,24 +161,30 @@ defmodule PhoenixKitDashboards.DashboardsTest do
   end
 
   describe "pixel-canvas bounds" do
-    test "crafted huge coordinates clamp to the position bound" do
+    test "crafted huge coordinates are bounded to one screen past existing content" do
       {:ok, dashboard} =
         Dashboards.create(%{title: "Px", scope: "system", config: %{"type" => "pixel"}})
 
       {:ok, dashboard} = Dashboards.add_widget(dashboard, "core.note")
       [%{"id" => id}] = dashboard.layout
 
+      # A crafted coordinate on the SOLE widget clamps to one screen (4000px),
+      # not the 20000 hard cap — a single move_widget_to can't balloon the
+      # shared canvas for every viewer (review finding #2).
       {:ok, dashboard} = Dashboards.place_widget_px(dashboard, id, 1_000_000_000, -50)
-      [inst] = dashboard.layout
-      px = Layout.pixel(inst)
-      assert px["fx"] == 20_000
-      assert px["fy"] == 0
+      note = hd(dashboard.layout)
+      assert Layout.pixel(note)["fx"] == 4000
+      assert Layout.pixel(note)["fy"] == 0
 
+      # A newly-added widget is bounded to one screen past the furthest existing
+      # edge — well under the 20000 hard cap, so the canvas can't be ballooned.
       {:ok, dashboard} =
         Dashboards.add_widget_px(dashboard, "core.clock", 999_999_999, 999_999_999)
 
       clock = Enum.find(dashboard.layout, &(&1["widget_key"] == "core.clock"))
-      assert Layout.pixel(clock)["fx"] == 20_000
+      note_right = Layout.pixel(note)["fx"] + Layout.pixel(note)["fw"]
+      assert Layout.pixel(clock)["fx"] <= note_right + 4000
+      assert Layout.pixel(clock)["fx"] < 20_000
     end
   end
 

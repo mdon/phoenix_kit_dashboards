@@ -336,12 +336,18 @@ defmodule PhoenixKitDashboards.Dashboards do
         {:error, :unknown_widget}
 
       %Widget{} = widget ->
+        # Same one-screen-past-existing-content bound as place_widget_px — the
+        # new instance isn't in dashboard.layout yet, so every existing widget
+        # counts (nil id matches none).
+        max_x = pixel_bound(dashboard, nil, :x)
+        max_y = pixel_bound(dashboard, nil, :y)
+
         instance =
           dashboard
           |> new_instance(widget, first_layout_id(dashboard))
           |> Layout.put_pixel(%{
-            "fx" => clamp(fx, 0, @free_max_pos),
-            "fy" => clamp(fy, 0, @free_max_pos)
+            "fx" => clamp(fx, 0, max_x),
+            "fy" => clamp(fy, 0, max_y)
           })
 
         dashboard
@@ -888,19 +894,46 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   @doc """
-  Free/pixel-canvas mode: place a widget at absolute pixels (`fx`, `fy`), each
-  clamped to `>= 0` (top-left of the canvas). Pixel geometry is embedded so it
-  never disturbs the grid placement. A layout tweak — not activity-logged.
+  Free/pixel-canvas mode: place a widget at absolute pixels (`fx`, `fy`). Each
+  is clamped to `[0, one screen past the furthest OTHER widget]` (capped at the
+  absolute `@free_max_pos`): the canvas can grow by a screenful per move, but a
+  single crafted `move_widget_to` can't balloon it to 20000px for every viewer
+  of a shared dashboard (`free_canvas_dims` sizes the canvas to contain widgets).
+  Pixel geometry is embedded so it never disturbs the grid placement. A layout
+  tweak — not activity-logged.
   """
   @spec place_widget_px(Dashboard.t(), instance_id :: String.t(), integer(), integer()) ::
           {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def place_widget_px(%Dashboard{} = dashboard, instance_id, fx, fy) do
+    max_x = pixel_bound(dashboard, instance_id, :x)
+    max_y = pixel_bound(dashboard, instance_id, :y)
+
     update_item(dashboard, instance_id, fn inst ->
       Layout.put_pixel(inst, %{
-        "fx" => clamp(fx, 0, @free_max_pos),
-        "fy" => clamp(fy, 0, @free_max_pos)
+        "fx" => clamp(fx, 0, max_x),
+        "fy" => clamp(fy, 0, max_y)
       })
     end)
+  end
+
+  # The furthest a widget may be positioned on an axis: one screen (@free_max_px)
+  # past the furthest edge of the OTHER widgets, capped at @free_max_pos. Lets the
+  # canvas grow a screenful per move while blocking a single-event balloon.
+  defp pixel_bound(dashboard, instance_id, axis) do
+    extent =
+      dashboard.layout
+      |> Enum.reject(&(&1["id"] == instance_id))
+      |> Enum.map(fn inst ->
+        px = Layout.pixel(inst)
+
+        case axis do
+          :x -> int(px["fx"], 0) + int(px["fw"], 0)
+          :y -> int(px["fy"], 0) + int(px["fh"], 0)
+        end
+      end)
+      |> Enum.max(fn -> 0 end)
+
+    min(extent + @free_max_px, @free_max_pos)
   end
 
   @doc """

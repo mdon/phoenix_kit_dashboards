@@ -957,7 +957,21 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     // the drop pane, back over the catalog, or an occupied cell — clears it, so
     // a drop is exactly "place where the preview shows" or a cancel.
     track(ev) {
-      var overCatalog = ev.target && ev.target.closest && ev.target.closest("#dashboard-catalog");
+      // Whether the pointer is over the (still-visible) catalog panel. Use rect
+      // math, NOT ev.target.closest(): on touch the pointerdown target keeps
+      // implicit pointer capture for the whole gesture, so ev.target stays the
+      // catalog entry and closest() would report "over catalog" forever —
+      // cancelling every drop. Mirrors the panel-hide rect check above. Once the
+      // panel hides (pointer left it), cells under it are droppable → false.
+      var overCatalog = false;
+      if (!this.panelHidden) {
+        var cr = this.el.getBoundingClientRect();
+        overCatalog =
+          ev.clientX >= cr.left &&
+          ev.clientX <= cr.right &&
+          ev.clientY >= cr.top &&
+          ev.clientY <= cr.bottom;
+      }
       // Grid mode targets the (possibly letterboxed) ARTBOARD, not the whole
       // pane — a drop in the blank letterbox margins must cancel, not clamp
       // onto the board. Pixel mode keeps the pane (its canvas fills it).
