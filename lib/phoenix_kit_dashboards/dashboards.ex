@@ -17,6 +17,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   alias PhoenixKitDashboards.Grid
   alias PhoenixKitDashboards.Lattice
   alias PhoenixKitDashboards.Layout
+  alias PhoenixKitDashboards.Layouts
   alias PhoenixKitDashboards.Registry
   alias PhoenixKitDashboards.Schemas.Dashboard
   alias PhoenixKitDashboards.Sizing
@@ -383,9 +384,7 @@ defmodule PhoenixKitDashboards.Dashboards do
 
     occupied = dashboard |> resolve_items(home) |> Enum.map(fn {_i, p} -> p end)
 
-    {x, y} =
-      Grid.first_free(occupied, seed_w, seed_h, cols, grid_rows(dashboard, home)) ||
-        {0, Grid.below_all(occupied)}
+    {x, y} = Grid.slot(occupied, seed_w, seed_h, cols, grid_rows(dashboard, home))
 
     %{
       "id" => UUIDv7.generate(),
@@ -615,49 +614,24 @@ defmodule PhoenixKitDashboards.Dashboards do
   # id (item["bp"][layout_id]). A layout without a stored placement for a
   # widget packs it first-fit at render (pinned on first edit).
 
-  # Every dashboard starts with this deterministic default (16:9 screenful:
-  # 64×36 cells = 1600×900 design px). The literal id matters: the entry is
-  # synthesized in memory until the first layout mutation persists the list.
-  @default_layout %{"id" => "l1", "name" => "Layout 1", "cols" => 64, "rows" => 36}
-
+  # The pure layout-list helpers (reading/normalizing the list, finding an
+  # entry, minting the next id/name, the default entry) live in
+  # `PhoenixKitDashboards.Layouts`; these delegates keep the long-standing
+  # `Dashboards.layouts/1` etc. as the module's public read API.
   @doc """
   The dashboard's grid layouts, ordered. A dashboard that has never persisted
   a layout list gets the default single "Layout 1" (64×36).
   """
   @spec layouts(Dashboard.t()) :: [map()]
-  def layouts(%Dashboard{} = dashboard) do
-    case dashboard.config do
-      %{"layouts" => [_ | _] = entries} ->
-        case Enum.filter(entries, &match?(%{"id" => _}, &1)) do
-          [] -> [@default_layout]
-          valid -> Enum.map(valid, &normalize_entry/1)
-        end
-
-      _ ->
-        [@default_layout]
-    end
-  end
-
-  defp normalize_entry(%{"id" => id} = entry) do
-    %{
-      "id" => to_string(id),
-      "name" => to_string(entry["name"] || "Layout"),
-      "cols" =>
-        clamp(entry["cols"] || @default_layout["cols"], Lattice.min_dim(), Lattice.max_dim()),
-      "rows" =>
-        clamp(entry["rows"] || @default_layout["rows"], Lattice.min_dim(), Lattice.max_dim())
-    }
-  end
+  defdelegate layouts(dashboard), to: Layouts
 
   @doc "One layout entry by id, or nil."
   @spec get_layout(Dashboard.t(), String.t()) :: map() | nil
-  def get_layout(%Dashboard{} = dashboard, id) when is_binary(id) do
-    Enum.find(layouts(dashboard), &(&1["id"] == id))
-  end
+  defdelegate get_layout(dashboard, id), to: Layouts
 
   @doc "The id of the first (default/landing) layout."
   @spec first_layout_id(Dashboard.t()) :: String.t()
-  def first_layout_id(%Dashboard{} = dashboard), do: hd(layouts(dashboard))["id"]
+  defdelegate first_layout_id(dashboard), to: Layouts
 
   @doc """
   Add a layout: named "Layout N" by default, dimensions copied from the
@@ -672,8 +646,8 @@ defmodule PhoenixKitDashboards.Dashboards do
     source = Enum.find(entries, hd(entries), &(&1["id"] == source_id))
 
     entry = %{
-      "id" => new_layout_id(entries),
-      "name" => Keyword.get(opts, :name) || next_layout_name(entries),
+      "id" => Layouts.new_layout_id(entries),
+      "name" => Keyword.get(opts, :name) || Layouts.next_layout_name(entries),
       "cols" => source["cols"],
       "rows" => source["rows"]
     }
@@ -710,22 +684,6 @@ defmodule PhoenixKitDashboards.Dashboards do
       {:ok, updated} -> {:ok, updated, entry}
       error -> error
     end
-  end
-
-  # Short random id ("l" + 8 hex chars), regenerated on the (astronomically
-  # unlikely) clash with an existing id in this dashboard.
-  defp new_layout_id(entries) do
-    id = "l" <> (UUIDv7.generate() |> String.replace("-", "") |> String.slice(-8..-1//1))
-    if Enum.any?(entries, &(&1["id"] == id)), do: new_layout_id(entries), else: id
-  end
-
-  defp next_layout_name(entries) do
-    taken = MapSet.new(entries, & &1["name"])
-
-    Enum.find_value(1..99, "Layout ?", fn n ->
-      name = "Layout #{n}"
-      if MapSet.member?(taken, name), do: nil, else: name
-    end)
   end
 
   @doc "Rename a layout (blank names are ignored). Not activity-logged."
@@ -794,7 +752,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   def grid_cols(%Dashboard{} = dashboard, layout_id) do
     case get_layout(dashboard, layout_id) do
       %{"cols" => cols} -> cols
-      nil -> @default_layout["cols"]
+      nil -> Layouts.default_layout()["cols"]
     end
   end
 
@@ -803,7 +761,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   def grid_rows(%Dashboard{} = dashboard, layout_id) do
     case get_layout(dashboard, layout_id) do
       %{"rows" => rows} -> rows
-      nil -> @default_layout["rows"]
+      nil -> Layouts.default_layout()["rows"]
     end
   end
 
@@ -1373,16 +1331,16 @@ defmodule PhoenixKitDashboards.Dashboards do
     {placed, unplaced} =
       Enum.split_with(entries, fn {_item, p} -> is_integer(p["x"]) and is_integer(p["y"]) end)
 
-    {packed, _occupied} =
-      unplaced
-      |> Enum.sort_by(fn {_item, p} -> p["pos"] end)
-      |> Enum.map_reduce(Enum.map(placed, fn {_i, p} -> p end), fn {item, p}, occupied ->
-        w = p["w"] |> Lattice.to_int(1) |> max(1) |> min(cols)
-        h = p["h"] |> Lattice.to_int(1) |> max(1) |> min(rows)
-        {x, y} = Grid.first_free(occupied, w, h, cols, rows) || {0, Grid.below_all(occupied)}
-        p2 = Map.merge(p, %{"x" => x, "y" => y, "w" => w, "h" => h})
-        {{item, p2}, [p2 | occupied]}
-      end)
+    # Pack the order-only widgets (in `pos` order) around the already-placed
+    # ones via the shared Grid primitive, then re-pair each result with its item.
+    sorted = Enum.sort_by(unplaced, fn {_item, p} -> p["pos"] end)
+
+    packed =
+      sorted
+      |> Enum.map(fn {_item, p} -> p end)
+      |> Grid.pack(Enum.map(placed, fn {_i, p} -> p end), cols, rows)
+      |> then(&Enum.zip(sorted, &1))
+      |> Enum.map(fn {{item, _p}, p2} -> {item, p2} end)
 
     Enum.sort_by(placed ++ packed, fn {_item, p} -> {p["y"], p["x"], p["pos"]} end)
   end

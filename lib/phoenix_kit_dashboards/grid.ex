@@ -95,30 +95,55 @@ defmodule PhoenixKitDashboards.Grid do
   end
 
   @doc """
-  Pack `placements` (their `w`/`h` spans, in list order) into explicit cells on
-  a `cols`-wide grid: each gets the first free rectangle in reading order, spans
-  clamped to the column count. Returns the placements with `"x"`/`"y"` set.
-  `rows` defaults to `max_rows/0`; pass the layout's real row count so a full
-  screenful falls back to `below_all/1` instead of packing past the visible
-  bottom edge.
-
-  This is the "reflow + compact" primitive behind widget reorder (sorted to
-  reading order first by the caller).
+  The cell `{x, y}` to drop a `w`×`h` rectangle onto `occupied`: the first free
+  slot in reading order, or — when the grid is packed solid through `rows` —
+  stacked directly below every placed widget (`below_all/1`). The single
+  placement primitive behind `pack/4`, new-widget seeding, and render-time
+  resolution (each previously re-spelled `first_free/5 || {0, below_all/1}`).
   """
-  @spec compact([map()], pos_integer(), pos_integer()) :: [map()]
-  def compact(placements, cols, rows \\ @max_rows) do
-    {packed, _occupied} =
-      Enum.map_reduce(placements, [], fn p, occupied ->
-        w = min(max(Lattice.to_int(p["w"], 1), 1), cols)
-        h = max(Lattice.to_int(p["h"], 1), 1)
+  @spec slot([map()], pos_integer(), pos_integer(), pos_integer(), pos_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  def slot(occupied, w, h, cols, rows) do
+    first_free(occupied, w, h, cols, rows) || {0, below_all(occupied)}
+  end
 
-        {x, y} = first_free(occupied, w, h, cols, rows) || {0, below_all(occupied)}
-        placed = p |> Map.put("x", x) |> Map.put("y", y) |> Map.put("w", w)
-        {placed, [placed | occupied]}
+  @doc """
+  Pack `placements` (their `w`/`h` spans, in list order) into explicit cells,
+  each dropped at its `slot/5` **onto `occupied`** — the already-placed
+  rectangles the packing must flow around (pass `[]` for a fresh grid). Spans
+  are coerced through `Lattice.to_int/2` and clamped into the `cols`×`rows`
+  screenful; the returned placements carry integer `"x"`/`"y"`/`"w"`/`"h"`.
+
+  This is the seeded primitive behind `compact/3` (a fresh pack) and the
+  render-time resolution of layouts that mix stored and order-only placements.
+  """
+  @spec pack([map()], [map()], pos_integer(), pos_integer()) :: [map()]
+  def pack(placements, occupied, cols, rows) do
+    {packed, _occupied} =
+      Enum.map_reduce(placements, occupied, fn p, occ ->
+        w = min(max(Lattice.to_int(p["w"], 1), 1), cols)
+        h = min(max(Lattice.to_int(p["h"], 1), 1), rows)
+        {x, y} = slot(occ, w, h, cols, rows)
+        placed = Map.merge(p, %{"x" => x, "y" => y, "w" => w, "h" => h})
+        {placed, [placed | occ]}
       end)
 
     packed
   end
+
+  @doc """
+  Pack `placements` (their `w`/`h` spans, in list order) into explicit cells on
+  a `cols`-wide grid: each gets the first free rectangle in reading order, spans
+  clamped to the `cols`×`rows` screenful. Returns the placements with integer
+  `"x"`/`"y"`/`"w"`/`"h"` set. `rows` defaults to `max_rows/0`; pass the layout's
+  real row count so a full screenful falls back to `below_all/1` instead of
+  packing past the visible bottom edge.
+
+  This is the "reflow + compact" primitive behind widget reorder (sorted to
+  reading order first by the caller) — a `pack/4` onto an empty grid.
+  """
+  @spec compact([map()], pos_integer(), pos_integer()) :: [map()]
+  def compact(placements, cols, rows \\ @max_rows), do: pack(placements, [], cols, rows)
 
   @doc """
   Clamp a requested `req_w`×`req_h` resize of the widget anchored at `(x, y)` so
