@@ -68,6 +68,37 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     };
   }
 
+  // ── Pure cell geometry (no DOM) — one definition, shared by every hook and
+  // unit-tested in Node (test/js/geom.test.mjs). Mirrors the server's
+  // PhoenixKitDashboards.Grid so the preview, the drop, and the persisted
+  // result always agree. ─────────────────────────────────────────────────────
+
+  // Does the w×h rect at (x,y) overlap any blocker {x,y,w,h}? Was copy-pasted as
+  // `collides`/`cellsCollide` three times.
+  function rectsOverlap(x, y, w, h, blockers) {
+    for (var i = 0; i < blockers.length; i++) {
+      var b = blockers[i];
+      if (x < b.x + b.w && b.x < x + w && y < b.y + b.h && b.y < y + h) return true;
+    }
+    return false;
+  }
+
+  // Clamp a requested cell span to the grid edge and grow-until-blocked (nearest
+  // neighbour or edge stops it), width first at the pre-drag height then height —
+  // the client half of the Grid.fit_size/8 invariant.
+  function fitSpan(reqW, reqH, x, y, cols, rows, minW, minH, startH, blockers) {
+    var w = Math.min(reqW, cols - x);
+    var h = Math.min(reqH, rows - y);
+    var probeH = Math.min(startH, h);
+    while (w > minW && rectsOverlap(x, y, w, probeH, blockers)) w--;
+    while (h > minH && rectsOverlap(x, y, w, h, blockers)) h--;
+    return { w: Math.max(w, 1), h: Math.max(h, 1) };
+  }
+
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { rectsOverlap: rectsOverlap, fitSpan: fitSpan };
+  }
+
   window.PhoenixKitDashboardsHooks.DashboardFreeDrag = {
     mounted() {
       var self = this;
@@ -272,27 +303,18 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var h = Math.max(this.minH, Math.min(this.maxH, Math.round((hpx + this.gapY) / this.strideY)));
       if (isNaN(this.gridX) || isNaN(this.gridY)) return { w: w, h: h };
 
-      w = Math.min(w, this.cols - this.gridX);
-      h = Math.min(h, this.maxRows() - this.gridY);
-      var probeH = Math.min(this.startH, h);
-      while (w > this.minW && this.cellsCollide(w, probeH)) w--;
-      while (h > this.minH && this.cellsCollide(w, h)) h--;
-      return { w: Math.max(w, 1), h: Math.max(h, 1) };
-    },
-
-    cellsCollide(w, h) {
-      for (var i = 0; i < this.blockers.length; i++) {
-        var b = this.blockers[i];
-        if (
-          this.gridX < b.x + b.w &&
-          b.x < this.gridX + w &&
-          this.gridY < b.y + b.h &&
-          b.y < this.gridY + h
-        ) {
-          return true;
-        }
-      }
-      return false;
+      return fitSpan(
+        w,
+        h,
+        this.gridX,
+        this.gridY,
+        this.cols,
+        this.maxRows(),
+        this.minW,
+        this.minH,
+        this.startH,
+        this.blockers
+      );
     },
 
     // Highlight the whole-cell rectangle the widget will snap to (grid resize), so
@@ -690,11 +712,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     },
 
     collides(x, y) {
-      for (var i = 0; i < this.blockers.length; i++) {
-        var b = this.blockers[i];
-        if (x < b.x + b.w && b.x < x + this.w && y < b.y + b.h && b.y < y + this.h) return true;
-      }
-      return false;
+      return rectsOverlap(x, y, this.w, this.h, this.blockers);
     },
 
     // The cell under the CLONE's top-left corner (the box the user is placing),
@@ -947,11 +965,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     },
 
     collides(x, y) {
-      for (var i = 0; i < this.blockers.length; i++) {
-        var b = this.blockers[i];
-        if (x < b.x + b.w && b.x < x + this.w && y < b.y + b.h && b.y < y + this.h) return true;
-      }
-      return false;
+      return rectsOverlap(x, y, this.w, this.h, this.blockers);
     },
 
     // The would-be placement under the pointer. Only a FREE, in-pane spot is a
