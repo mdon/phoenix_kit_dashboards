@@ -209,7 +209,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   end
 
   # A catalog entry dragged out and dropped on a grid cell (DashboardCatalogDrag).
-  # x/y are 0-based cells for the active bp; the context clamps + refuses an
+  # x/y are 0-based cells for the active layout_id; the context clamps + refuses an
   # occupied spot (the hook only offers free cells).
   defp do_handle_event("add_widget_at", %{"key" => key, "x" => x, "y" => y}, socket)
        when is_binary(key) do
@@ -260,7 +260,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   end
 
   # Pushed by the DashboardGridDrag hook when a widget is dropped on a new cell
-  # (the active bp). x/y are 0-based grid cells; the context clamps to the tier
+  # (the active layout_id). x/y are 0-based grid cells; the context clamps to the layout
   # and refuses an occupied spot (the hook never offers one — stale/crafted
   # events only, so the error is a silent no-op).
   defp do_handle_event("move_widget_grid", %{"id" => id, "x" => x, "y" => y}, socket)
@@ -444,7 +444,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   end
 
   # Grid-mode resize (active layout): the card snaps to the nearest cell on
-  # release. The context clamps to the widget type's min/max + the bp's columns.
+  # release. The context clamps to the widget type's min/max + the layout_id's columns.
   defp do_handle_event("resize_widget_to", %{"id" => id, "w" => w, "h" => h}, socket)
        when is_binary(id) do
     with rw when rw >= 1 <- to_i(w),
@@ -745,8 +745,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   end
 
   # The assigns a widget's LiveComponent receives on a periodic refresh — `size` is
-  # the active tier's resolved placement (matching the first render), or the default
-  # tier when unavailable.
+  # the active layout's resolved placement (matching the first render), or the default
+  # layout when unavailable.
   defp widget_update_assigns(inst, scope, placement) do
     # Grid mode passes the resolved placement; PIXEL mode derives cells from
     # the real px box (fw/fh ÷ the 25px cell) — falling back to the grid
@@ -858,16 +858,16 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     Dashboards.resize_widget_px(dashboard, id, to_i(fw), to_i(fh))
   end
 
-  defp maybe_resize(dashboard, id, bp, %{"w" => w, "h" => h}) when w != "" and h != "" do
-    Dashboards.resize_widget(dashboard, id, bp, to_i(w), to_i(h))
+  defp maybe_resize(dashboard, id, layout_id, %{"w" => w, "h" => h}) when w != "" and h != "" do
+    Dashboards.resize_widget(dashboard, id, layout_id, to_i(w), to_i(h))
   end
 
   defp maybe_resize(dashboard, _id, _bp, _params), do: {:ok, dashboard}
 
   # The Settings modal's grid Column/Row inputs (the no-JS placement fallback).
   # Displayed 1-based; the placement is 0-based cells.
-  defp maybe_place(dashboard, id, bp, %{"x" => x, "y" => y}) when x != "" and y != "" do
-    Dashboards.place_widget_grid(dashboard, id, bp, to_i(x) - 1, to_i(y) - 1)
+  defp maybe_place(dashboard, id, layout_id, %{"x" => x, "y" => y}) when x != "" and y != "" do
+    Dashboards.place_widget_grid(dashboard, id, layout_id, to_i(x) - 1, to_i(y) - 1)
   end
 
   # Pixel mode: exact-px position from the modal's X/Y inputs (the no-JS/no-drag
@@ -1538,7 +1538,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   # Resize bounds fed to the DashboardResize hook (as data-*). Grid: the resolved
   # placement span + the widget type's min/max clamped to the active layout's
-  # columns. Pixel: the default-bp span (unused by the pixel resize, which uses px).
+  # columns. Pixel: the default-layout_id span (unused by the pixel resize, which uses px).
   defp card_limits(%{mode: "grid", inst: inst, placement: placement, cols: cols} = assigns) do
     {min, max} = Sizing.bounds(inst, assigns.active_layout)
     cols = cols || 12
@@ -1547,8 +1547,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     %{
       w: p["w"] |> to_int(4),
       h: p["h"] |> to_int(2),
-      # Both bounds clamp to the tier's columns — a widget whose global min_w
-      # exceeds them (legal, the cap is the largest tier) must not hand the
+      # Both bounds clamp to the layout's columns — a widget whose global min_w
+      # exceeds them (legal, the cap is the largest layout) must not hand the
       # resize hook min > max, or the client would snap to a span the server
       # then rejects down to the column count.
       min_w: min(min.w, cols),
@@ -1560,16 +1560,18 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
 
   defp card_limits(%{inst: inst}), do: size_limits(inst)
 
-  # Span limits for an instance on a layout,
-  # clamped to that tier's column count — the settings modal passes the active
-  # tier (and its dashboard-resolved column count) so its W input allows a full
-  # row there.
-  defp size_limits(inst, bp \\ "default", cols \\ nil) do
+  # Span limits for an instance on a layout, clamped to that layout's column
+  # count — the settings modal passes the active layout (and its
+  # dashboard-resolved column count) so its W input allows a full row there. The
+  # default layout_id is only reached from the pixel-mode fallback above, where
+  # grid placement is inert: no layout has that id, so Layout.placement/2 falls
+  # back to the widget's legacy flat span (pixel resize uses px, not these).
+  defp size_limits(inst, layout_id \\ "_pixel_fallback", cols \\ nil) do
     cols = cols || 12
-    p = Layout.placement(inst, bp)
+    p = Layout.placement(inst, layout_id)
     w = p["w"] |> to_int(4) |> clamp(1, cols)
     h = p["h"] |> to_int(2) |> max(1)
-    {min, max} = Sizing.bounds(inst, bp)
+    {min, max} = Sizing.bounds(inst, layout_id)
 
     %{w: w, h: h, min_w: min(min.w, cols), max_w: min(max.w, cols), min_h: min.h, max_h: max.h}
   end
@@ -1656,8 +1658,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   defp clamp(value, lo, hi), do: Lattice.clamp(value, lo, hi)
 
   # Resolve the widget type for an instance and render its LiveComponent. The
-  # widget's `size` is the placement for the tier being viewed (so density-aware
-  # widgets adapt), falling back to the default tier when none is given (pixel mode).
+  # widget's `size` is the placement for the layout being viewed (so density-aware
+  # widgets adapt), falling back to the default layout when none is given (pixel mode).
   # A placed widget is re-gated by the same visibility rule as the catalog
   # (module enabled + scope permission) — so DISABLING a module immediately
   # stops its widgets rendering/querying (a fresh ModuleRegistry lookup). A
@@ -1812,8 +1814,8 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     widget = Registry.get(assigns.instance["widget_key"])
     {fx, fy, fw, fh} = free_geometry(assigns.instance)
 
-    # Show the RESOLVED size for the tier being edited (matches what's on screen, incl.
-    # derived tiers) so saving doesn't overwrite a derived size with the default.
+    # Show the RESOLVED size for the layout being edited (matches what's on screen, incl.
+    # derived layouts) so saving doesn't overwrite a derived size with the default.
     grid = assigns.grid_placement || Layout.placement(assigns.instance, assigns.active_layout)
 
     assigns =

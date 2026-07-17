@@ -154,9 +154,13 @@ type for the builder's internal render switch).
 
 **Geometry is embedded per widget** (`PhoenixKitDashboards.Layout`) so add/remove is
 atomic — a widget item is `%{id, widget_key, settings, view, "pixel" => %{fx,fy,fw,fh},
-"bp" => %{<bp> => %{x,y,w,h,hidden,pos}}}`. `Layout.pixel/1` + `placement/2` default
-and fall back to the legacy flat shape (`pos` is the legacy-order tiebreaker; items
-without stored `x`/`y` are packed at render and pinned on their first edit).
+"bp" => %{<layout_id> => %{x,y,w,h,hidden,pos}}}`. The grid-placement JSONB key stays
+`"bp"` for back-compat, but it is keyed by **layout id** (`"l1"`, …), not a device
+breakpoint — the code accordingly names the argument `layout_id` (the pre-lattice
+`bp`/"tier" vocabulary was renamed 2026-07-18; only the storage key is unchanged).
+`Layout.pixel/1` + `placement/2` default and fall back to the legacy flat shape
+(`pos` is the legacy-order tiebreaker; items without stored `x`/`y` are packed at
+render and pinned on their first edit).
 
 - **`"grid"` — the SCREENFUL LATTICE.** A grid dashboard is an ordered list
   of named layouts in `config["layouts"]`
