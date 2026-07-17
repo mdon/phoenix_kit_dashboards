@@ -17,6 +17,27 @@ Two core ideas:
    of placed widget instances, persisted as a JSONB `layout` list (the
    `phoenix_kit_crm` `view_config` precedent), scoped personal / system / role.
 
+## What this module does NOT have (by design)
+
+Its job is the widget-dashboard builder — placing widget *instances* on a
+per-user canvas. It deliberately stays thin so the surface is small and widget
+providers stay decoupled:
+
+- **No database tables or migrations of its own** — the
+  `phoenix_kit_dashboards` table and its `config` column ship as **core**
+  migrations (`V133` / `V139`), and DB access goes through
+  `PhoenixKit.RepoHelper.repo/0`. This module owns no Ecto repo and no DDL.
+- **No gettext backend or `priv/gettext`** — user-facing strings route to
+  core's `PhoenixKitWeb.Gettext` (the standard for a small module).
+- **No `route_module/0`** — the list page and the per-dashboard builder are
+  both `admin_tabs/0` entries with `live_view:` set (single-page pattern); no
+  locale-prefixed route variants.
+- **No dependency on widget providers** — the arrow points one way: a provider
+  exposes `phoenix_kit_widgets/0` and the Registry discovers it at runtime;
+  this module never depends on a provider package.
+- **No one-click presets (yet)** — a new dashboard starts empty; the ready-made
+  "Overview" / "personal" preset sets are a TODO (see below), not shipped.
+
 ## Key Modules
 
 - `PhoenixKitDashboards` — `PhoenixKit.Module` callbacks (tab, permission,
@@ -26,7 +47,7 @@ Two core ideas:
   `min_size` (`min_size_for/2`); resize limits, the settings modal, and view
   switching (which auto-grows the placement where the grid has room) all honour
   the selected view's floor. `Widgets.ClockWidget` is the worked example:
-  normal/digital/analog views (analog floors at 2×2), per-instance timezone
+  normal/digital/analog views (analog floors at 8×8), per-instance timezone
   (fixed UTC offsets always; IANA city zones only when the host configures a tz
   database) and a show/hide-timezone toggle.
 - `PhoenixKitDashboards.Registry` — convention-based discovery (queries
@@ -44,7 +65,7 @@ Two core ideas:
   builder. `PhoenixKitDashboards.Web.Helpers` provides `actor_opts/1` for
   threading the acting user into context calls.
 
-## Conventions (inherited from the PhoenixKit ecosystem)
+## Critical Conventions
 
 - **Module key** `"dashboards"`, consistent across all callbacks.
 - **Tab IDs** prefixed `:admin_` (`:admin_dashboards`).
@@ -286,14 +307,33 @@ mix credo --strict
 mix precommit            # compile (warnings-as-errors) + checks
 ```
 
-## Versioning & Releases (boss-only)
+## Versioning & Releases
 
-Releases are cut by the maintainer — agents stop at the PR at the current version.
-Do **not** bump `@version`, edit `CHANGELOG.md`, tag, or `mix hex.publish`. Version
-locations (bumped together at release time): `mix.exs` `@version`,
-`lib/phoenix_kit_dashboards.ex` `version/0`,
-`test/phoenix_kit_dashboards_test.exs` assertion. Tags are bare version numbers
-(`0.1.0`, no `v` prefix).
+This project follows [Semantic Versioning](https://semver.org/). The version
+lives in **`mix.exs`** (`@version`); `lib/phoenix_kit_dashboards.ex`'s `version/0`
+derives it at compile time (`Mix.Project.config()[:version]`) and
+`test/phoenix_kit_dashboards_test.exs` asserts the two stay in sync — so a
+release bumps `@version` in `mix.exs` only.
+
+Tags use **bare version numbers** (no `v` prefix):
+
+```bash
+git tag 0.1.0
+git push origin 0.1.0
+gh release create 0.1.0 --title "0.1.0 - YYYY-MM-DD" --notes "..."
+```
+
+### Full release checklist
+
+1. Bump `@version` in `mix.exs`.
+2. Add a `CHANGELOG.md` entry.
+3. Run `mix precommit` — ensure zero warnings/errors.
+4. Commit: `"Bump version to x.y.z"`.
+5. Push to `main` and **verify the push succeeded** before tagging.
+6. `git tag x.y.z && git push origin x.y.z`.
+7. `gh release create x.y.z --title "x.y.z - YYYY-MM-DD" --notes "..."`.
+
+**Never tag before all changes are committed and pushed.** Tags are immutable pointers.
 
 ## Pull Requests
 
