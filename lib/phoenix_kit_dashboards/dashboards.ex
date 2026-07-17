@@ -262,6 +262,11 @@ defmodule PhoenixKitDashboards.Dashboards do
   @spec add_widget(Dashboard.t(), widget_key :: String.t(), keyword()) ::
           {:ok, Dashboard.t()} | {:error, term()}
   def add_widget(%Dashboard{} = dashboard, widget_key, opts \\ []) do
+    # Unlike add_widget_at/6, this does NOT materialize_grid first: it appends at
+    # the first free cell (new_instance) without pinning the other widgets'
+    # derived placements. Explicit-cell placement (add_widget_at) needs a stable
+    # grid to anchor against, so it materializes; a plain append doesn't disturb
+    # anyone, so it skips that write.
     case Registry.get(widget_key) do
       nil ->
         {:error, :unknown_widget}
@@ -1059,7 +1064,11 @@ defmodule PhoenixKitDashboards.Dashboards do
   @spec configure_widget(
           Dashboard.t(),
           instance_id :: String.t(),
-          %{optional(:settings) => map(), optional(:view) => String.t() | nil},
+          %{
+            optional(:settings) => map(),
+            optional(:view) => String.t() | nil,
+            optional(:min_override) => boolean()
+          },
           keyword()
         ) :: {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def configure_widget(%Dashboard{} = dashboard, instance_id, attrs, opts \\ [])
@@ -1264,7 +1273,17 @@ defmodule PhoenixKitDashboards.Dashboards do
       {count, _} =
         Dashboard
         |> where([d], d.uuid == ^original.uuid)
-        |> where([d], fragment("coalesce((?->>'rev')::int, 0)", d.config) == ^expected)
+        # Guard the ::int cast with a digit-only regex so a tampered/corrupt
+        # non-numeric stored rev matches as 0 (like rev/1 treats it) instead of
+        # raising an uncaught "invalid input syntax for integer" DB error.
+        |> where(
+          [d],
+          fragment(
+            "(case when (?->>'rev') ~ '^[0-9]+$' then (?->>'rev')::int else 0 end)",
+            d.config,
+            d.config
+          ) == ^expected
+        )
         |> repo().update_all(set: set)
 
       if count == 1 do

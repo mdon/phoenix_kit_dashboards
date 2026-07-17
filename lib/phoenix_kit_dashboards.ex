@@ -67,7 +67,12 @@ defmodule PhoenixKitDashboards do
 
   @impl PhoenixKit.Module
   def enable_system do
-    Settings.update_boolean_setting_with_module("dashboards_enabled", true, @module_key)
+    result = Settings.update_boolean_setting_with_module("dashboards_enabled", true, @module_key)
+    # Rebuild the widget catalog so a provider installed/enabled alongside this
+    # module is picked up without a BEAM restart (core has no module-toggle
+    # event to hook, so this refreshes on our own toggle at least).
+    PhoenixKitDashboards.Registry.refresh()
+    result
   end
 
   @impl PhoenixKit.Module

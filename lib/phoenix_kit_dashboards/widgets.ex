@@ -106,6 +106,9 @@ defmodule PhoenixKitDashboards.Widgets do
         component: ModuleStatsWidget,
         default_size: %{w: 16, h: 8},
         min_size: %{w: 8, h: 4},
+        # No refresh_interval by design: a module's get_config/0 stats change
+        # slowly (installed-module counts, config), so this widget is static —
+        # reopen the dashboard to re-read. Only the clock declares a refresh.
         # Two render variants — the widget also collapses to the compact layout
         # automatically when the instance is sized too small for the table.
         views: [

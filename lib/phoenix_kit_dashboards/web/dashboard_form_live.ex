@@ -171,7 +171,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
   # role dashboards stay visible to their members — but the UI doesn't offer
   # creating them. An already-role-scoped dashboard is grandfathered on edit so
   # saving can't silently convert it to personal.
-  defp role_scope_visible?(dashboard, _roles), do: match?(%{scope: "role"}, dashboard)
+  defp role_scope_visible?(dashboard), do: match?(%{scope: "role"}, dashboard)
 
   defp blank_to_default(nil, default), do: default
   defp blank_to_default("", default), do: default
@@ -243,7 +243,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
                   {Gettext.gettext(PhoenixKitWeb.Gettext, "Personal"), "personal"},
                   {Gettext.gettext(PhoenixKitWeb.Gettext, "Shared"), "system"}
                 ] ++
-                  if(role_scope_visible?(@dashboard, @roles),
+                  if(role_scope_visible?(@dashboard),
                     do: [{Gettext.gettext(PhoenixKitWeb.Gettext, "By role"), "role"}],
                     else: []
                   )
@@ -251,7 +251,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
             />
 
             <.select
-              :if={role_scope_visible?(@dashboard, @roles)}
+              :if={role_scope_visible?(@dashboard)}
               name="role_uuid"
               label={Gettext.gettext(PhoenixKitWeb.Gettext, "Role")}
               value={@dashboard && @dashboard.role_uuid}

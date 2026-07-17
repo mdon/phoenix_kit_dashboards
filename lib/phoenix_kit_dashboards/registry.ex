@@ -26,8 +26,29 @@ defmodule PhoenixKitDashboards.Registry do
   widget on that module's enablement + permission like any module widget.
 
   The result is memoized in `:persistent_term`, mirroring how core's
-  `ModuleRegistry` caches tabs and permissions. Call `refresh/0` after modules
-  are toggled to rebuild.
+  `ModuleRegistry` caches tabs and permissions.
+
+  ## Cache freshness — what's live vs memoized
+
+  Module **enablement** and scope **permission** are re-checked LIVE on every
+  read (`visible_for_scope?/2` calls `module_enabled?/1`), so toggling a module
+  shows/hides its widgets immediately — no refresh needed.
+
+  The cached catalog's STRUCTURE is memoized, so these need `refresh/0` (or a
+  BEAM restart) to update:
+
+    * a **new provider** installed into the running system, or a provider whose
+      widget **definitions** change (`views` / `settings_schema` /
+      `refresh_interval`);
+    * **computed catalog options** built at discovery time — the Module-stats
+      widget's installed-modules picker (`ModuleStatsWidget.module_options/0`)
+      and providers' data-driven selects (e.g. `phoenix_kit_projects`' project
+      picker), which won't reflect a module toggled on or a row created at
+      runtime until rebuilt.
+
+  Core exposes no module-toggle event to hook, so `refresh/0` is host/provider
+  driven: this module refreshes on its own enable, and a provider that changes
+  computed options at runtime should call `PhoenixKitDashboards.Registry.refresh/0`.
   """
 
   require Logger

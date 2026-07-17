@@ -34,17 +34,21 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
   def update(assigns, socket) do
     settings = assigns[:settings] || %{}
     # Defense in depth: the context filters settings to scalars, but a widget
-    # must never let a legacy/hostile stored value crash every later mount.
-    body = with b when is_binary(b) <- Map.get(settings, "body", ""), do: b
-    body = if is_binary(body), do: body, else: ""
+    # must never let a legacy/hostile non-binary value crash a later mount — so
+    # both title and body coerce to a binary.
+    title = string_or(Map.get(settings, "title"), "Note")
+    body = string_or(Map.get(settings, "body"), "")
 
     {:ok,
      socket
      |> assign(:id, assigns.id)
-     |> assign(:title, Map.get(settings, "title", "Note"))
+     |> assign(:title, title)
      |> assign(:body, body)
      |> assign(:font_cqmin, fit_font(body, assigns[:size]))}
   end
+
+  defp string_or(v, _default) when is_binary(v), do: v
+  defp string_or(_v, default), do: default
 
   # CONTENT-AWARE type: the font size that lets the whole note fit its box,
   # in container-query units so it tracks the rendered size at any fit scale.
