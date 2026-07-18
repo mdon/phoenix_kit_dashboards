@@ -27,6 +27,7 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
   it on that cadence — the widget never subscribes/times itself.
   """
   use Phoenix.LiveComponent
+  use Gettext, backend: PhoenixKitWeb.Gettext
 
   import PhoenixKitWeb.Components.Core.Markdown, only: [markdown: 1]
 
@@ -34,17 +35,28 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
   def update(assigns, socket) do
     settings = assigns[:settings] || %{}
     # Defense in depth: the context filters settings to scalars, but a widget
-    # must never let a legacy/hostile stored value crash every later mount.
-    body = with b when is_binary(b) <- Map.get(settings, "body", ""), do: b
-    body = if is_binary(body), do: body, else: ""
+    # must never let a legacy/hostile non-binary value crash a later mount.
+    # `title` keeps a non-string SCALAR (a numeric/boolean host-seeded value
+    # still renders as "42"/"true"); only a map/list (which HEEx can't render)
+    # falls back to the default. `body` drops any non-binary to "".
+    title = title_string(Map.get(settings, "title"))
+    body = string_or(Map.get(settings, "body"), "")
 
     {:ok,
      socket
      |> assign(:id, assigns.id)
-     |> assign(:title, Map.get(settings, "title", "Note"))
+     |> assign(:title, title)
      |> assign(:body, body)
      |> assign(:font_cqmin, fit_font(body, assigns[:size]))}
   end
+
+  defp string_or(v, _default) when is_binary(v), do: v
+  defp string_or(_v, default), do: default
+
+  defp title_string(v) when is_binary(v), do: v
+  defp title_string(v) when is_number(v), do: to_string(v)
+  defp title_string(v) when is_boolean(v), do: to_string(v)
+  defp title_string(_v), do: "Note"
 
   # CONTENT-AWARE type: the font size that lets the whole note fit its box,
   # in container-query units so it tracks the rendered size at any fit scale.
@@ -86,7 +98,7 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
       <div class="card-body flex h-full min-h-0 flex-col gap-1 overflow-hidden p-3">
         <h3 class="card-title text-[8cqmin] leading-tight">{@title}</h3>
         <p :if={@body == ""} class="text-[6cqmin] text-base-content/70">
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "Empty note — open settings to add text.")}
+          {gettext("Empty note — open settings to add text.")}
         </p>
         <%!-- prose children are em-based, so scaling the prose ROOT font
         scales the whole rendered markdown. `.prose` sets its own root size,

@@ -1,0 +1,10 @@
+{
+  "name": "phoenix_kit_dashboards",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Node unit tests for the prebuilt LiveView hook bundle's pure cell geometry.",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test \"test/js/**/*.test.cjs\""
+  }
+}

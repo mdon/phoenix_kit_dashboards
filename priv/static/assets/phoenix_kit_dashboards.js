@@ -6,11 +6,13 @@
 //
 // All hooks are progressive enhancement — both dashboard types stay operable
 // without JS via the Settings modal inputs:
-//   DashboardGridDrag  — grid cell placement (drag a widget to any free cell)
-//   DashboardFreeDrag  — pixel-canvas move (left/top px)
-//   DashboardResize    — corner resize (cells in grid, px in pixel mode)
-//   DashboardGridFit / DashboardFreeFit / DashboardFullscreen
-//                      — fit-scaling and fullscreen helpers
+//   DashboardGridDrag    — grid cell placement (drag a widget to any free cell)
+//   DashboardCatalogDrag — drag a widget type out of the catalog onto the canvas
+//   DashboardFreeDrag    — pixel-canvas move (left/top px)
+//   DashboardResize      — corner resize (cells in grid, px in pixel mode)
+//   DashboardGridFit / DashboardFreeFit / DashboardFitScreen / DashboardFullscreen
+//                        — fit-scaling, fit-to-screen, and fullscreen helpers
+//   DashboardVisibility  — reports viewport width so a dashboard mounts fitted
 window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
 
 (function () {
@@ -64,6 +66,37 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
         }
       }
     };
+  }
+
+  // ── Pure cell geometry (no DOM) — one definition, shared by every hook and
+  // unit-tested in Node (test/js/geom.test.mjs). Mirrors the server's
+  // PhoenixKitDashboards.Grid so the preview, the drop, and the persisted
+  // result always agree. ─────────────────────────────────────────────────────
+
+  // Does the w×h rect at (x,y) overlap any blocker {x,y,w,h}? Was copy-pasted as
+  // `collides`/`cellsCollide` three times.
+  function rectsOverlap(x, y, w, h, blockers) {
+    for (var i = 0; i < blockers.length; i++) {
+      var b = blockers[i];
+      if (x < b.x + b.w && b.x < x + w && y < b.y + b.h && b.y < y + h) return true;
+    }
+    return false;
+  }
+
+  // Clamp a requested cell span to the grid edge and grow-until-blocked (nearest
+  // neighbour or edge stops it), width first at the pre-drag height then height —
+  // the client half of the Grid.fit_size/8 invariant.
+  function fitSpan(reqW, reqH, x, y, cols, rows, minW, minH, startH, blockers) {
+    var w = Math.min(reqW, cols - x);
+    var h = Math.min(reqH, rows - y);
+    var probeH = Math.min(startH, h);
+    while (w > minW && rectsOverlap(x, y, w, probeH, blockers)) w--;
+    while (h > minH && rectsOverlap(x, y, w, h, blockers)) h--;
+    return { w: Math.max(w, 1), h: Math.max(h, 1) };
+  }
+
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { rectsOverlap: rectsOverlap, fitSpan: fitSpan };
   }
 
   window.PhoenixKitDashboardsHooks.DashboardFreeDrag = {
@@ -250,7 +283,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     maxRows() {
       var grid = document.getElementById("dashboard-grid");
       var v = grid && parseInt(grid.getAttribute("data-max-rows"), 10);
-      return v || 50;
+      return v || 36;
     },
 
     // CSS px for a span of `n` cells given per-cell stride + gap: n cells hold
@@ -270,27 +303,18 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
       var h = Math.max(this.minH, Math.min(this.maxH, Math.round((hpx + this.gapY) / this.strideY)));
       if (isNaN(this.gridX) || isNaN(this.gridY)) return { w: w, h: h };
 
-      w = Math.min(w, this.cols - this.gridX);
-      h = Math.min(h, this.maxRows() - this.gridY);
-      var probeH = Math.min(this.startH, h);
-      while (w > this.minW && this.cellsCollide(w, probeH)) w--;
-      while (h > this.minH && this.cellsCollide(w, h)) h--;
-      return { w: Math.max(w, 1), h: Math.max(h, 1) };
-    },
-
-    cellsCollide(w, h) {
-      for (var i = 0; i < this.blockers.length; i++) {
-        var b = this.blockers[i];
-        if (
-          this.gridX < b.x + b.w &&
-          b.x < this.gridX + w &&
-          this.gridY < b.y + b.h &&
-          b.y < this.gridY + h
-        ) {
-          return true;
-        }
-      }
-      return false;
+      return fitSpan(
+        w,
+        h,
+        this.gridX,
+        this.gridY,
+        this.cols,
+        this.maxRows(),
+        this.minW,
+        this.minH,
+        this.startH,
+        this.blockers
+      );
     },
 
     // Highlight the whole-cell rectangle the widget will snap to (grid resize), so
@@ -688,11 +712,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     },
 
     collides(x, y) {
-      for (var i = 0; i < this.blockers.length; i++) {
-        var b = this.blockers[i];
-        if (x < b.x + b.w && b.x < x + this.w && y < b.y + b.h && b.y < y + this.h) return true;
-      }
-      return false;
+      return rectsOverlap(x, y, this.w, this.h, this.blockers);
     },
 
     // The cell under the CLONE's top-left corner (the box the user is placing),
@@ -945,11 +965,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     },
 
     collides(x, y) {
-      for (var i = 0; i < this.blockers.length; i++) {
-        var b = this.blockers[i];
-        if (x < b.x + b.w && b.x < x + this.w && y < b.y + b.h && b.y < y + this.h) return true;
-      }
-      return false;
+      return rectsOverlap(x, y, this.w, this.h, this.blockers);
     },
 
     // The would-be placement under the pointer. Only a FREE, in-pane spot is a
@@ -957,7 +973,21 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     // the drop pane, back over the catalog, or an occupied cell — clears it, so
     // a drop is exactly "place where the preview shows" or a cancel.
     track(ev) {
-      var overCatalog = ev.target && ev.target.closest && ev.target.closest("#dashboard-catalog");
+      // Whether the pointer is over the (still-visible) catalog panel. Use rect
+      // math, NOT ev.target.closest(): on touch the pointerdown target keeps
+      // implicit pointer capture for the whole gesture, so ev.target stays the
+      // catalog entry and closest() would report "over catalog" forever —
+      // cancelling every drop. Mirrors the panel-hide rect check above. Once the
+      // panel hides (pointer left it), cells under it are droppable → false.
+      var overCatalog = false;
+      if (!this.panelHidden) {
+        var cr = this.el.getBoundingClientRect();
+        overCatalog =
+          ev.clientX >= cr.left &&
+          ev.clientX <= cr.right &&
+          ev.clientY >= cr.top &&
+          ev.clientY <= cr.bottom;
+      }
       // Grid mode targets the (possibly letterboxed) ARTBOARD, not the whole
       // pane — a drop in the blank letterbox margins must cancel, not clamp
       // onto the board. Pixel mode keeps the pane (its canvas fills it).
@@ -1166,17 +1196,21 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
   };
 
   // `DashboardGridFit` — sizes the grid canvas into the pane. Standard 25px
-  // cells: per-axis stretch absorbs the last <=10% (a fitted screen fills
+  // cells: per-axis stretch absorbs the last <=4% (a fitted screen fills
   // exactly); otherwise the artboard shrinks to fit a smaller pane or floats
   // centered at natural size in a bigger one — never blown up. Editable at
   // any scale; re-fits on resize / fullscreen change (both fire the RO).
   window.PhoenixKitDashboardsHooks.DashboardGridFit = {
     mounted() {
       var self = this;
-      this._ro = new ResizeObserver(function () {
-        self.fit();
-      });
-      this._ro.observe(this.el);
+      // Guarded like DashboardFreeFit — the window `resize` listener below is the
+      // fallback where ResizeObserver is unavailable.
+      if (typeof ResizeObserver === "function") {
+        this._ro = new ResizeObserver(function () {
+          self.fit();
+        });
+        this._ro.observe(this.el);
+      }
       this._onResize = function () {
         self.fit();
       };
@@ -1196,7 +1230,7 @@ window.PhoenixKitDashboardsHooks = window.PhoenixKitDashboardsHooks || {};
     // ONE SCREENFUL, NEVER SCROLLS. The design canvas (cols*25 x rows*25)
     // scales into the pane:
     //  - when the pane's shape roughly matches the layout's (per-axis scales
-    //    within ~10% of each other), scale each axis independently — the
+    //    within ~4% of each other), scale each axis independently — the
     //    board fills the pane edge-to-edge, cells go imperceptibly
     //    non-square, no orphan strip;
     //  - beyond that tolerance, uniform scale + letterbox: an intact

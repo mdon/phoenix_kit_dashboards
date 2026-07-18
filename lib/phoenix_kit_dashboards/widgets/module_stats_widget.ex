@@ -12,6 +12,7 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
   SELECT (`module_options/0`) — nobody should have to know registry keys.
   """
   use Phoenix.LiveComponent
+  use Gettext, backend: PhoenixKitWeb.Gettext
 
   alias PhoenixKit.Users.Auth.Scope
 
@@ -22,7 +23,7 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
   """
   @spec module_options() :: [{String.t(), String.t()}]
   def module_options do
-    prompt = {Gettext.gettext(PhoenixKitWeb.Gettext, "Select a module…"), ""}
+    prompt = {gettext("Select a module…"), ""}
 
     options =
       if Code.ensure_loaded?(PhoenixKit.ModuleRegistry) do
@@ -101,9 +102,7 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
         </h3>
 
         <p :if={@stats == %{}} class="text-[7cqmin] text-base-content/50">
-          {Gettext.gettext(
-            PhoenixKitWeb.Gettext,
-            "No stats — pick a module in this widget's settings."
+          {gettext("No stats — pick a module in this widget's settings."
           )}
         </p>
 
@@ -127,7 +126,7 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
             :if={@beyond > 0}
             class="pt-[1cqmin] text-right text-[5cqmin] leading-none text-base-content/40"
           >
-            +{@beyond} {Gettext.gettext(PhoenixKitWeb.Gettext, "more")}
+            +{@beyond} {gettext("more")}
           </div>
         </div>
 
@@ -139,7 +138,7 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
             {map_size(@stats)}
           </span>
           <span class="text-[7cqmin] text-base-content/50">
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "stats")}
+            {gettext("stats")}
           </span>
         </div>
       </div>
@@ -149,7 +148,7 @@ defmodule PhoenixKitDashboards.Widgets.ModuleStatsWidget do
 
   # The module's human name for the card title (falls back to the raw key for
   # an uninstalled/unknown module).
-  defp module_label(""), do: Gettext.gettext(PhoenixKitWeb.Gettext, "Module stats")
+  defp module_label(""), do: gettext("Module stats")
 
   defp module_label(module_key) do
     with true <- Code.ensure_loaded?(PhoenixKit.ModuleRegistry),

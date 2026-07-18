@@ -70,7 +70,7 @@ defmodule PhoenixKitDashboards.GridTest do
              ] = packed
     end
 
-    test "clamps a span wider than the target columns (tier derivation)" do
+    test "clamps a span wider than the target columns (layout derivation)" do
       assert [%{"x" => 0, "y" => 0, "w" => 4}] = Grid.compact([%{"w" => 10, "h" => 2}], 4)
     end
 
@@ -80,6 +80,18 @@ defmodule PhoenixKitDashboards.GridTest do
       # below row 4, not silently take a y inside 0..3 that would overlap.
       packed = Grid.compact([%{"w" => 4, "h" => 4}, %{"w" => 4, "h" => 4}], 4, 4)
       assert [%{"x" => 0, "y" => 0}, %{"x" => 0, "y" => 4}] = packed
+    end
+
+    test "preserves an explicit height that exceeds the rows (never silently shrinks it)" do
+      # A materialized/legacy placement can carry h > rows — grid_materialized?/2
+      # gates only on x/y, and resolve_designed passes explicit placements
+      # verbatim — so reorder_widgets/add_layout can feed such a span into
+      # compact. It must keep the height and stack the next widget below the FULL
+      # extent, never clamp it into the screenful. Regression guard: a shared
+      # pack/4 that row-clamps + rewrites h would place the second widget at y: 4
+      # and persist h: 4 here (caught by the multi-AI re-review of the #12 dedup).
+      packed = Grid.compact([%{"w" => 4, "h" => 8}, %{"w" => 4, "h" => 2}], 4, 4)
+      assert [%{"x" => 0, "y" => 0, "h" => 8}, %{"x" => 0, "y" => 8}] = packed
     end
   end
 
@@ -108,6 +120,41 @@ defmodule PhoenixKitDashboards.GridTest do
       # Neighbour below at y=3: height stops at 3.
       others = [p(0, 3, 4, 2)]
       assert {4, 3} = Grid.fit_size(0, 0, 4, 6, 2, others, {12, 160}, @bounds)
+    end
+  end
+
+  # A tampered/legacy JSONB span can carry a string or float w/h; the grid math
+  # must coerce, never raise ArithmeticError (review finding #8).
+  describe "non-integer spans (defensive coercion)" do
+    test "collides? treats string / float / nil w and h as coerced integers" do
+      # String "4" behaves as 4: a rect at x=0,w=4 collides with the string-span
+      # neighbour occupying [2, 2+4).
+      assert Grid.collides?(0, 0, 4, 2, [%{"x" => 2, "y" => 0, "w" => "4", "h" => "2"}])
+      # Float span coerces (trunc) — occupies [2, 2+3), so x=5 is clear.
+      refute Grid.collides?(5, 0, 2, 2, [%{"x" => 2, "y" => 0, "w" => 3.9, "h" => 2.0}])
+      # Missing/garbage span falls back to 1×1, never raises.
+      assert Grid.collides?(2, 0, 1, 1, [%{"x" => 2, "y" => 0, "w" => nil, "h" => :bad}])
+    end
+
+    test "below_all coerces a string/float height, flooring to 1" do
+      assert Grid.below_all([%{"y" => 2, "h" => "3"}]) == 5
+      assert Grid.below_all([%{"y" => 2, "h" => 3.7}]) == 5
+      # A "0"/negative height floors to 1 (renders one cell), so y=2 → 3.
+      assert Grid.below_all([%{"y" => 2, "h" => "0"}]) == 3
+    end
+
+    test "a zero/negative span is floored to 1 for collision (renders one cell)" do
+      # An explicit placement stored with "w" => "0" renders one cell wide, so
+      # collision must treat it as at least one cell — else a second widget
+      # could pack into the same cell (review re-pass, Codex).
+      assert Grid.collides?(0, 0, 1, 1, [%{"x" => 0, "y" => 0, "w" => "0", "h" => "0"}])
+      assert Grid.collides?(0, 0, 1, 1, [%{"x" => 0, "y" => 0, "w" => -5, "h" => -5}])
+    end
+
+    test "compact packs placements with string spans without crashing" do
+      packed = Grid.compact([%{"w" => "4", "h" => "2"}, %{"w" => 4, "h" => 2}], 12, 160)
+      assert length(packed) == 2
+      assert Enum.all?(packed, &(is_integer(&1["x"]) and is_integer(&1["y"])))
     end
   end
 end

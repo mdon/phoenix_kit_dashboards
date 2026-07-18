@@ -383,7 +383,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLiveTest do
       refute html =~ ~s(phx-click="set_mode")
     end
 
-    test "a pixel dashboard renders the free canvas — no Layout bar, no zoom, no tiers",
+    test "a pixel dashboard renders the free canvas — no Layout bar, no zoom, no layout tabs",
          %{conn: conn} do
       {conn, user} = sign_in(conn)
       dashboard = fixture_dashboard(user.uuid, %{config: %{"type" => "pixel"}})

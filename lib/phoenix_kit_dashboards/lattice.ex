@@ -4,7 +4,7 @@ defmodule PhoenixKitDashboards.Lattice do
 
   A layout's `cols × rows` is **exactly one screenful** of STANDARD cells —
   nothing ever scrolls. The fit hook stretches per-axis only to absorb the
-  last ~10% (a fitted screen fills exactly edge-to-edge); otherwise the
+  last ~4% (a fitted screen fills exactly edge-to-edge); otherwise the
   intact artboard shrinks into a smaller pane, or floats centered at natural
   size in a bigger one — never blown up (a bigger display wants its own
   fitted layout). Widget cards carry a small internal margin instead of grid
@@ -50,4 +50,51 @@ defmodule PhoenixKitDashboards.Lattice do
   @doc "Per-axis stretch tolerance (see moduledoc)."
   @spec stretch_tolerance() :: float()
   def stretch_tolerance, do: @stretch_tolerance
+
+  # Free/pixel-canvas widget bounds (px). A pixel dashboard is an absolute-px
+  # canvas rather than a lattice, but its bounds live here as the one home for
+  # every geometry constant.
+  @free_min_px 60
+  @free_max_px 4000
+  @free_max_pos 20_000
+
+  @doc "Minimum free/pixel-canvas widget size in px."
+  @spec free_min_px() :: pos_integer()
+  def free_min_px, do: @free_min_px
+
+  @doc "Maximum free/pixel-canvas widget size in px (also the per-move growth budget)."
+  @spec free_max_px() :: pos_integer()
+  def free_max_px, do: @free_max_px
+
+  @doc "Absolute hard cap for a free/pixel-canvas position (px)."
+  @spec free_max_pos() :: pos_integer()
+  def free_max_pos, do: @free_max_pos
+
+  @doc """
+  Coerce a stored geometry value to an integer — the single coercion for
+  tampered/legacy JSONB that may carry a string or float where an int is
+  expected. Floats truncate; numeric strings parse; anything else falls back to
+  `default`.
+  """
+  @spec to_int(term(), integer()) :: integer()
+  def to_int(v, _default) when is_integer(v), do: v
+  def to_int(v, _default) when is_float(v), do: trunc(v)
+
+  def to_int(v, default) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, _} -> n
+      :error -> default
+    end
+  end
+
+  def to_int(_v, default), do: default
+
+  @doc """
+  Clamp an integer into `[lo, hi]` — the single clamp shared across the module.
+  A non-integer value (tampered/legacy JSONB) collapses to `lo` rather than
+  raising in downstream cell arithmetic.
+  """
+  @spec clamp(term(), integer(), integer()) :: integer()
+  def clamp(v, lo, hi) when is_integer(v), do: v |> max(lo) |> min(hi)
+  def clamp(_v, lo, _hi), do: lo
 end

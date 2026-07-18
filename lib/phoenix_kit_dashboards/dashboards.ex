@@ -17,16 +17,17 @@ defmodule PhoenixKitDashboards.Dashboards do
   alias PhoenixKitDashboards.Grid
   alias PhoenixKitDashboards.Lattice
   alias PhoenixKitDashboards.Layout
+  alias PhoenixKitDashboards.Layouts
   alias PhoenixKitDashboards.Registry
   alias PhoenixKitDashboards.Schemas.Dashboard
+  alias PhoenixKitDashboards.Sizing
   alias PhoenixKitDashboards.Widget
 
-  # Free/pixel-canvas widget size bounds (px).
-  @free_min_px 60
-  @free_max_px 4000
-  # Position bound: far past any real canvas, but crafted 1e9 coords must not
-  # persist (the fit hook would size a canvas the browser can't survive).
-  @free_max_pos 20_000
+  # Free/pixel-canvas widget bounds (px) — the values live in Lattice, the one
+  # home for geometry constants.
+  @free_min_px Lattice.free_min_px()
+  @free_max_px Lattice.free_max_px()
+  @free_max_pos Lattice.free_max_pos()
 
   # px per lattice unit when seeding a new widget's pixel-canvas geometry from
   # its span (the lattice cell is 25px, so the pixel seed mirrors the grid).
@@ -82,9 +83,12 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   @doc """
   Return the user's default personal dashboard, creating an empty one on first
-  access. This is the page shown at the module's landing route.
+  access. Host-facing helper for a "default dashboard" landing page — the
+  built-in module lists dashboards rather than opening one, so nothing in this
+  package calls it; it's public API for hosts that want the get-or-create-default
+  pattern.
   """
-  @spec get_or_create_default(user_uuid :: String.t()) :: Dashboard.t()
+  @spec get_or_create_default(user_uuid :: String.t()) :: Dashboard.t() | nil
   def get_or_create_default(user_uuid) when is_binary(user_uuid) do
     # Ordered so a duplicate default (a rare concurrent-first-access race — no
     # unique index guards is_default) resolves to the SAME row on every read.
@@ -97,18 +101,24 @@ defmodule PhoenixKitDashboards.Dashboards do
 
     case repo().one(query) do
       nil ->
-        {:ok, dashboard} =
-          create(
-            %{
-              title: "My Dashboard",
-              scope: "personal",
-              owner_user_uuid: user_uuid,
-              is_default: true
-            },
-            actor_uuid: user_uuid
-          )
+        case create(
+               %{
+                 title: "My Dashboard",
+                 scope: "personal",
+                 owner_user_uuid: user_uuid,
+                 is_default: true
+               },
+               actor_uuid: user_uuid
+             ) do
+          {:ok, dashboard} ->
+            dashboard
 
-        dashboard
+          # A create error here is a lost concurrent first-access race (no unique
+          # index on is_default) — the winner's row now satisfies the query. A
+          # genuine DB failure returns nil rather than raising a MatchError.
+          {:error, _} ->
+            repo().one(query)
+        end
 
       dashboard ->
         dashboard
@@ -247,12 +257,17 @@ defmodule PhoenixKitDashboards.Dashboards do
   @doc """
   Add a widget instance for `widget_key` to a dashboard's layout, seeded with the
   widget type's default size and settings — the grid placement takes the first
-  FREE cell on the home tier, the pixel geometry stacks below the existing
+  FREE cell on the home layout, the pixel geometry stacks below the existing
   widgets. Returns the updated dashboard.
   """
   @spec add_widget(Dashboard.t(), widget_key :: String.t(), keyword()) ::
           {:ok, Dashboard.t()} | {:error, term()}
   def add_widget(%Dashboard{} = dashboard, widget_key, opts \\ []) do
+    # Unlike add_widget_at/6, this does NOT materialize_grid first: it appends at
+    # the first free cell (new_instance) without pinning the other widgets'
+    # derived placements. Explicit-cell placement (add_widget_at) needs a stable
+    # grid to anchor against, so it materializes; a plain append doesn't disturb
+    # anyone, so it skips that write.
     case Registry.get(widget_key) do
       nil ->
         {:error, :unknown_widget}
@@ -267,8 +282,8 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   @doc """
-  Add a widget at an explicit grid cell on `bp` (a catalog drag-out drop) —
-  `x`/`y` 0-based, clamped into the tier; a spot overlapping another widget is
+  Add a widget at an explicit grid cell on `layout_id` (a catalog drag-out drop) —
+  `x`/`y` 0-based, clamped into the layout; a spot overlapping another widget is
   refused with `{:error, :occupied}` (the drag hook only offers free cells).
   Logs `dashboard.widget_added`.
   """
@@ -282,8 +297,8 @@ defmodule PhoenixKitDashboards.Dashboards do
         ) ::
           {:ok, Dashboard.t()}
           | {:error, :stale | :unknown_widget | :occupied | Ecto.Changeset.t()}
-  def add_widget_at(%Dashboard{} = dashboard, widget_key, bp, x, y, opts \\ [])
-      when is_binary(bp) and is_integer(x) and is_integer(y) do
+  def add_widget_at(%Dashboard{} = dashboard, widget_key, layout_id, x, y, opts \\ [])
+      when is_binary(layout_id) and is_integer(x) and is_integer(y) do
     case Registry.get(widget_key) do
       nil ->
         {:error, :unknown_widget}
@@ -291,22 +306,22 @@ defmodule PhoenixKitDashboards.Dashboards do
       %Widget{} = widget ->
         # Pin the layout first so placing the new widget can't shift others
         # that were still packed-at-render.
-        dashboard = materialize_grid(dashboard, bp)
-        cols = grid_cols(dashboard, bp)
-        rows = grid_rows(dashboard, bp)
+        dashboard = materialize_grid(dashboard, layout_id)
+        cols = grid_cols(dashboard, layout_id)
+        rows = grid_rows(dashboard, layout_id)
         w = min(widget.default_size.w, cols)
         h = min(widget.default_size.h, rows)
         x = clamp(x, 0, max(cols - w, 0))
         y = clamp(y, 0, max(rows - h, 0))
-        others = Enum.map(dashboard.layout, &Layout.placement(&1, bp))
+        others = Enum.map(dashboard.layout, &Layout.placement(&1, layout_id))
 
         if Grid.collides?(x, y, w, h, others) do
           {:error, :occupied}
         else
           instance =
             dashboard
-            |> new_instance(widget, bp)
-            |> Layout.put_placement(bp, %{
+            |> new_instance(widget, layout_id)
+            |> Layout.put_placement(layout_id, %{
               "x" => x,
               "y" => y,
               "w" => w,
@@ -336,12 +351,18 @@ defmodule PhoenixKitDashboards.Dashboards do
         {:error, :unknown_widget}
 
       %Widget{} = widget ->
+        # Same one-screen-past-existing-content bound as place_widget_px — the
+        # new instance isn't in dashboard.layout yet, so every existing widget
+        # counts.
+        max_x = pixel_bound(dashboard, :x)
+        max_y = pixel_bound(dashboard, :y)
+
         instance =
           dashboard
           |> new_instance(widget, first_layout_id(dashboard))
           |> Layout.put_pixel(%{
-            "fx" => clamp(fx, 0, @free_max_pos),
-            "fy" => clamp(fy, 0, @free_max_pos)
+            "fx" => clamp(fx, 0, max_x),
+            "fy" => clamp(fy, 0, max_y)
           })
 
         dashboard
@@ -363,9 +384,7 @@ defmodule PhoenixKitDashboards.Dashboards do
 
     occupied = dashboard |> resolve_items(home) |> Enum.map(fn {_i, p} -> p end)
 
-    {x, y} =
-      Grid.first_free(occupied, seed_w, seed_h, cols, grid_rows(dashboard, home)) ||
-        {0, Grid.below_all(occupied)}
+    {x, y} = Grid.slot(occupied, seed_w, seed_h, cols, grid_rows(dashboard, home))
 
     %{
       "id" => UUIDv7.generate(),
@@ -400,11 +419,11 @@ defmodule PhoenixKitDashboards.Dashboards do
   """
   @spec reorder_widgets(Dashboard.t(), String.t(), [String.t()]) ::
           {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
-  def reorder_widgets(%Dashboard{} = dashboard, bp, ordered_ids)
-      when is_binary(bp) and is_list(ordered_ids) do
-    dashboard = materialize_grid(dashboard, bp)
-    cols = grid_cols(dashboard, bp)
-    rows = grid_rows(dashboard, bp)
+  def reorder_widgets(%Dashboard{} = dashboard, layout_id, ordered_ids)
+      when is_binary(layout_id) and is_list(ordered_ids) do
+    dashboard = materialize_grid(dashboard, layout_id)
+    cols = grid_cols(dashboard, layout_id)
+    rows = grid_rows(dashboard, layout_id)
 
     order =
       ordered_ids |> Enum.filter(&is_binary/1) |> Enum.uniq() |> Enum.with_index() |> Map.new()
@@ -418,7 +437,7 @@ defmodule PhoenixKitDashboards.Dashboards do
 
     packed =
       ranked
-      |> Enum.map(fn {item, _idx} -> Layout.placement(item, bp) end)
+      |> Enum.map(fn {item, _idx} -> Layout.placement(item, layout_id) end)
       |> Grid.compact(cols, rows)
 
     placements =
@@ -431,7 +450,7 @@ defmodule PhoenixKitDashboards.Dashboards do
 
     layout =
       Enum.map(dashboard.layout, fn item ->
-        Layout.put_placement(item, bp, Map.fetch!(placements, item["id"]))
+        Layout.put_placement(item, layout_id, Map.fetch!(placements, item["id"]))
       end)
 
     save_pinned(dashboard, layout)
@@ -439,7 +458,7 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   @doc """
   Place a grid widget at an explicit cell — `x` (column) / `y` (row), 0-based —
-  on layout `bp`. The widget may go anywhere on the
+  on layout `layout_id`. The widget may go anywhere on the
   grid (gaps are fine); `x` is clamped so the span stays within the columns, `y`
   within the layout's rows. A spot overlapping another widget is refused with
   `{:error, :occupied}` (the drag hook never offers one; this guards stale/
@@ -452,28 +471,28 @@ defmodule PhoenixKitDashboards.Dashboards do
           integer(),
           integer()
         ) :: {:ok, Dashboard.t()} | {:error, :stale | :occupied | Ecto.Changeset.t()}
-  def place_widget_grid(%Dashboard{} = dashboard, instance_id, bp, x, y)
-      when is_binary(bp) and is_integer(x) and is_integer(y) do
-    dashboard = materialize_grid(dashboard, bp)
+  def place_widget_grid(%Dashboard{} = dashboard, instance_id, layout_id, x, y)
+      when is_binary(layout_id) and is_integer(x) and is_integer(y) do
+    dashboard = materialize_grid(dashboard, layout_id)
 
     case Enum.find(dashboard.layout, &(&1["id"] == instance_id)) do
       nil -> {:ok, dashboard}
-      item -> place_at_cell(dashboard, item, instance_id, bp, x, y)
+      item -> place_at_cell(dashboard, item, instance_id, layout_id, x, y)
     end
   end
 
-  defp place_at_cell(dashboard, item, instance_id, bp, x, y) do
-    cols = grid_cols(dashboard, bp)
-    placement = Layout.placement(item, bp)
+  defp place_at_cell(dashboard, item, instance_id, layout_id, x, y) do
+    cols = grid_cols(dashboard, layout_id)
+    placement = Layout.placement(item, layout_id)
     w = min(placement["w"], cols)
     h = placement["h"]
     x = clamp(x, 0, max(cols - w, 0))
-    y = clamp(y, 0, max(grid_rows(dashboard, bp) - h, 0))
+    y = clamp(y, 0, max(grid_rows(dashboard, layout_id) - h, 0))
 
     others =
       dashboard.layout
       |> Enum.reject(&(&1["id"] == instance_id))
-      |> Enum.map(&Layout.placement(&1, bp))
+      |> Enum.map(&Layout.placement(&1, layout_id))
 
     if Grid.collides?(x, y, w, h, others) do
       {:error, :occupied}
@@ -481,7 +500,7 @@ defmodule PhoenixKitDashboards.Dashboards do
       layout =
         Enum.map(dashboard.layout, fn
           %{"id" => ^instance_id} = inst ->
-            Layout.put_placement(inst, bp, %{"x" => x, "y" => y, "w" => w})
+            Layout.put_placement(inst, layout_id, %{"x" => x, "y" => y, "w" => w})
 
           inst ->
             inst
@@ -492,7 +511,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   @doc """
-  Set a grid widget's `w`/`h` span on layout `bp`.
+  Set a grid widget's `w`/`h` span on layout `layout_id`.
   Clamped to the widget type's min/max — and to what actually FITS at the
   widget's cell: it grows until blocked by a neighbouring widget or the grid
   edge (`Grid.fit_size/8`), never onto another widget. A layout tweak — not
@@ -506,29 +525,33 @@ defmodule PhoenixKitDashboards.Dashboards do
           pos_integer()
         ) ::
           {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
-  def resize_widget(%Dashboard{} = dashboard, instance_id, bp, w, h) when is_binary(bp) do
-    dashboard = materialize_grid(dashboard, bp)
-    cols = grid_cols(dashboard, bp)
+  def resize_widget(%Dashboard{} = dashboard, instance_id, layout_id, w, h)
+      when is_binary(layout_id) do
+    dashboard = materialize_grid(dashboard, layout_id)
+    cols = grid_cols(dashboard, layout_id)
 
     others =
       dashboard.layout
       |> Enum.reject(&(&1["id"] == instance_id))
-      |> Enum.map(&Layout.placement(&1, bp))
+      |> Enum.map(&Layout.placement(&1, layout_id))
 
-    rows = grid_rows(dashboard, bp)
+    rows = grid_rows(dashboard, layout_id)
 
     layout =
       Enum.map(dashboard.layout, fn
-        %{"id" => ^instance_id} = inst -> resize_instance(inst, bp, w, h, others, cols, rows)
-        inst -> inst
+        %{"id" => ^instance_id} = inst ->
+          resize_instance(inst, layout_id, w, h, others, cols, rows)
+
+        inst ->
+          inst
       end)
 
     save_pinned(dashboard, layout)
   end
 
-  defp resize_instance(inst, bp, w, h, others, cols, rows) do
-    bounds = size_bounds(inst, bp)
-    placement = Layout.placement(inst, bp)
+  defp resize_instance(inst, layout_id, w, h, others, cols, rows) do
+    bounds = Sizing.bounds(inst, layout_id)
+    placement = Layout.placement(inst, layout_id)
 
     case {placement["x"], placement["y"]} do
       {x, y} when is_integer(x) and is_integer(y) ->
@@ -540,7 +563,7 @@ defmodule PhoenixKitDashboards.Dashboards do
         if Grid.collides?(x, y, w2, h2, others) do
           inst
         else
-          Layout.put_placement(inst, bp, %{"w" => w2, "h" => h2})
+          Layout.put_placement(inst, layout_id, %{"w" => w2, "h" => h2})
         end
 
       _ ->
@@ -548,7 +571,7 @@ defmodule PhoenixKitDashboards.Dashboards do
         # bounds clamp.
         {min, max} = bounds
 
-        Layout.put_placement(inst, bp, %{
+        Layout.put_placement(inst, layout_id, %{
           "w" => clamp(w, min.w, min(max.w, cols)),
           "h" => clamp(h, min.h, max.h)
         })
@@ -556,19 +579,27 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   @doc """
-  Show/hide a grid widget on `bp` (so smaller screens can drop non-essentials),
-  A layout tweak — not activity-logged.
+  Show/hide a grid widget on `layout_id` (so a layout can drop non-essentials). A layout
+  tweak — not activity-logged.
+
+  Host-facing: the render path fully supports hidden widgets (they keep their
+  cells and the builder dims them; `resolve_items/3` `visible: true` filters
+  them for the runtime), but the built-in builder ships no hide toggle yet — a
+  host wires this setter (with `resolve_hidden?/3`) to its own UI.
   """
   @spec hide_widget(Dashboard.t(), instance_id :: String.t(), String.t(), boolean()) ::
           {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
-  def hide_widget(%Dashboard{} = dashboard, instance_id, bp, hidden)
-      when is_binary(bp) and is_boolean(hidden) do
-    dashboard = materialize_grid(dashboard, bp)
+  def hide_widget(%Dashboard{} = dashboard, instance_id, layout_id, hidden)
+      when is_binary(layout_id) and is_boolean(hidden) do
+    dashboard = materialize_grid(dashboard, layout_id)
 
     layout =
       Enum.map(dashboard.layout, fn
-        %{"id" => ^instance_id} = inst -> Layout.put_placement(inst, bp, %{"hidden" => hidden})
-        inst -> inst
+        %{"id" => ^instance_id} = inst ->
+          Layout.put_placement(inst, layout_id, %{"hidden" => hidden})
+
+        inst ->
+          inst
       end)
 
     save_pinned(dashboard, layout)
@@ -583,49 +614,24 @@ defmodule PhoenixKitDashboards.Dashboards do
   # id (item["bp"][layout_id]). A layout without a stored placement for a
   # widget packs it first-fit at render (pinned on first edit).
 
-  # Every dashboard starts with this deterministic default (16:9 screenful:
-  # 64×36 cells = 1600×900 design px). The literal id matters: the entry is
-  # synthesized in memory until the first layout mutation persists the list.
-  @default_layout %{"id" => "l1", "name" => "Layout 1", "cols" => 64, "rows" => 36}
-
+  # The pure layout-list helpers (reading/normalizing the list, finding an
+  # entry, minting the next id/name, the default entry) live in
+  # `PhoenixKitDashboards.Layouts`; these delegates keep the long-standing
+  # `Dashboards.layouts/1` etc. as the module's public read API.
   @doc """
   The dashboard's grid layouts, ordered. A dashboard that has never persisted
   a layout list gets the default single "Layout 1" (64×36).
   """
   @spec layouts(Dashboard.t()) :: [map()]
-  def layouts(%Dashboard{} = dashboard) do
-    case dashboard.config do
-      %{"layouts" => [_ | _] = entries} ->
-        case Enum.filter(entries, &match?(%{"id" => _}, &1)) do
-          [] -> [@default_layout]
-          valid -> Enum.map(valid, &normalize_entry/1)
-        end
-
-      _ ->
-        [@default_layout]
-    end
-  end
-
-  defp normalize_entry(%{"id" => id} = entry) do
-    %{
-      "id" => to_string(id),
-      "name" => to_string(entry["name"] || "Layout"),
-      "cols" =>
-        clamp(entry["cols"] || @default_layout["cols"], Lattice.min_dim(), Lattice.max_dim()),
-      "rows" =>
-        clamp(entry["rows"] || @default_layout["rows"], Lattice.min_dim(), Lattice.max_dim())
-    }
-  end
+  defdelegate layouts(dashboard), to: Layouts
 
   @doc "One layout entry by id, or nil."
   @spec get_layout(Dashboard.t(), String.t()) :: map() | nil
-  def get_layout(%Dashboard{} = dashboard, id) when is_binary(id) do
-    Enum.find(layouts(dashboard), &(&1["id"] == id))
-  end
+  defdelegate get_layout(dashboard, id), to: Layouts
 
   @doc "The id of the first (default/landing) layout."
   @spec first_layout_id(Dashboard.t()) :: String.t()
-  def first_layout_id(%Dashboard{} = dashboard), do: hd(layouts(dashboard))["id"]
+  defdelegate first_layout_id(dashboard), to: Layouts
 
   @doc """
   Add a layout: named "Layout N" by default, dimensions copied from the
@@ -640,23 +646,25 @@ defmodule PhoenixKitDashboards.Dashboards do
     source = Enum.find(entries, hd(entries), &(&1["id"] == source_id))
 
     entry = %{
-      "id" => new_layout_id(entries),
-      "name" => Keyword.get(opts, :name) || next_layout_name(entries),
+      "id" => Layouts.new_layout_id(entries),
+      "name" => Keyword.get(opts, :name) || Layouts.next_layout_name(entries),
       "cols" => source["cols"],
       "rows" => source["rows"]
     }
 
-    # Seed: the source layout's resolved placements, compacted into the new
-    # grid in reading order (dims match, so this is a straight copy).
+    # Seed the new layout from the source's resolved placements, compacted into
+    # the new grid in reading order (dims match, so this is a straight copy).
+    # Resolve once — `resolve_items` packs the whole layout — and reuse for both
+    # the compaction input and the item→placement pairing.
+    resolved = resolve_items(dashboard, source["id"])
+
     seeded =
-      dashboard
-      |> resolve_items(source["id"])
+      resolved
       |> Enum.map(fn {_item, p} -> p end)
       |> Grid.compact(entry["cols"], entry["rows"])
 
     seeds =
-      dashboard
-      |> resolve_items(source["id"])
+      resolved
       |> Enum.zip(seeded)
       |> Map.new(fn {{item, _}, p} -> {item["id"], p} end)
 
@@ -678,22 +686,6 @@ defmodule PhoenixKitDashboards.Dashboards do
       {:ok, updated} -> {:ok, updated, entry}
       error -> error
     end
-  end
-
-  # Short random id ("l" + 8 hex chars), regenerated on the (astronomically
-  # unlikely) clash with an existing id in this dashboard.
-  defp new_layout_id(entries) do
-    id = "l" <> (UUIDv7.generate() |> String.replace("-", "") |> String.slice(-8..-1//1))
-    if Enum.any?(entries, &(&1["id"] == id)), do: new_layout_id(entries), else: id
-  end
-
-  defp next_layout_name(entries) do
-    taken = MapSet.new(entries, & &1["name"])
-
-    Enum.find_value(1..99, "Layout ?", fn n ->
-      name = "Layout #{n}"
-      if MapSet.member?(taken, name), do: nil, else: name
-    end)
   end
 
   @doc "Rename a layout (blank names are ignored). Not activity-logged."
@@ -752,12 +744,17 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   defp drop_layout_entry(inst, _id), do: inst
 
+  # NOTE: grid_cols/grid_rows read through get_layout → layouts/1, which already
+  # clamps cols/rows to the lattice bounds [min_dim, max_dim] (a tampered/huge or
+  # non-integer stored dim can't reach design_width/height uncapped). Only the
+  # PIXEL read path (BuilderLive.free_geometry, via Layout.pixel) needed a new
+  # read-side clamp — Layout.pixel doesn't bound fw/fh.
   @doc "The column count of a layout (default entry's when the id is unknown)."
   @spec grid_cols(Dashboard.t(), String.t()) :: pos_integer()
   def grid_cols(%Dashboard{} = dashboard, layout_id) do
     case get_layout(dashboard, layout_id) do
       %{"cols" => cols} -> cols
-      nil -> @default_layout["cols"]
+      nil -> Layouts.default_layout()["cols"]
     end
   end
 
@@ -766,7 +763,7 @@ defmodule PhoenixKitDashboards.Dashboards do
   def grid_rows(%Dashboard{} = dashboard, layout_id) do
     case get_layout(dashboard, layout_id) do
       %{"rows" => rows} -> rows
-      nil -> @default_layout["rows"]
+      nil -> Layouts.default_layout()["rows"]
     end
   end
 
@@ -837,8 +834,8 @@ defmodule PhoenixKitDashboards.Dashboards do
     |> resolve_items(layout_id)
     |> Enum.map(fn {_item, p} ->
       case dim do
-        :cols -> if is_integer(p["x"]), do: p["x"] + (p["w"] || 1), else: 0
-        :rows -> if is_integer(p["y"]), do: p["y"] + (p["h"] || 1), else: 0
+        :cols -> if is_integer(p["x"]), do: p["x"] + max(Lattice.to_int(p["w"], 1), 1), else: 0
+        :rows -> if is_integer(p["y"]), do: p["y"] + max(Lattice.to_int(p["h"], 1), 1), else: 0
       end
     end)
     |> Enum.max(fn -> 0 end)
@@ -864,43 +861,78 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   @doc """
-  The **resolved** grid placement for one widget on `bp` — exactly what
+  The **resolved** grid placement for one widget on `layout_id` — exactly what
   `resolve_items/3` renders for it, or `nil` if the widget isn't in the layout.
   Use this (not `Layout.placement/2`) anywhere that must match what's on screen —
   e.g. the Settings modal's inputs, so a save doesn't overwrite a derived
   placement with the default.
   """
   @spec resolve_placement(Dashboard.t(), instance_id :: String.t(), String.t()) :: map() | nil
-  def resolve_placement(%Dashboard{} = dashboard, id, bp) do
-    case Enum.find(resolve_items(dashboard, bp), fn {item, _p} -> item["id"] == id end) do
+  def resolve_placement(%Dashboard{} = dashboard, id, layout_id) do
+    case Enum.find(resolve_items(dashboard, layout_id), fn {item, _p} -> item["id"] == id end) do
       nil -> nil
       {_item, placement} -> placement
     end
   end
 
-  @doc "Whether a widget is currently hidden on `bp` (stored or derived)."
+  @doc """
+  Whether a widget is currently hidden on `layout_id` (stored or derived). The read
+  counterpart to `hide_widget/4` — host-facing (see that function's note).
+  """
   @spec resolve_hidden?(Dashboard.t(), instance_id :: String.t(), String.t()) :: boolean()
-  def resolve_hidden?(%Dashboard{} = dashboard, id, bp) do
-    case resolve_placement(dashboard, id, bp) do
+  def resolve_hidden?(%Dashboard{} = dashboard, id, layout_id) do
+    case resolve_placement(dashboard, id, layout_id) do
       nil -> false
       placement -> placement["hidden"] == true
     end
   end
 
   @doc """
-  Free/pixel-canvas mode: place a widget at absolute pixels (`fx`, `fy`), each
-  clamped to `>= 0` (top-left of the canvas). Pixel geometry is embedded so it
-  never disturbs the grid placement. A layout tweak — not activity-logged.
+  Free/pixel-canvas mode: place a widget at absolute pixels (`fx`, `fy`). Each
+  is clamped to `[0, one screen past the furthest OTHER widget]` (capped at the
+  absolute `@free_max_pos`): the canvas can grow by a screenful per move, but a
+  single crafted `move_widget_to` can't balloon it to 20000px for every viewer
+  of a shared dashboard (`free_canvas_dims` sizes the canvas to contain widgets).
+  Pixel geometry is embedded so it never disturbs the grid placement. A layout
+  tweak — not activity-logged.
   """
   @spec place_widget_px(Dashboard.t(), instance_id :: String.t(), integer(), integer()) ::
           {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def place_widget_px(%Dashboard{} = dashboard, instance_id, fx, fy) do
+    max_x = pixel_bound(dashboard, :x)
+    max_y = pixel_bound(dashboard, :y)
+
     update_item(dashboard, instance_id, fn inst ->
       Layout.put_pixel(inst, %{
-        "fx" => clamp(fx, 0, @free_max_pos),
-        "fy" => clamp(fy, 0, @free_max_pos)
+        "fx" => clamp(fx, 0, max_x),
+        "fy" => clamp(fy, 0, max_y)
       })
     end)
+  end
+
+  # The furthest a widget may be positioned on an axis: one screen (@free_max_px)
+  # past the furthest EXISTING widget edge, capped at @free_max_pos. Includes the
+  # widget being moved (its own current edge counts) so a widget already parked
+  # far out isn't yanked back when peers move nearer — a micro-drag or a settings
+  # re-save that resubmits its current fx/fy keeps it in place. Lets the canvas
+  # grow a screenful per move while blocking a single-event balloon.
+  defp pixel_bound(dashboard, axis) do
+    extent =
+      dashboard.layout
+      |> Enum.map(fn inst ->
+        px = Layout.pixel(inst)
+
+        case axis do
+          :x -> int(px["fx"], 0) + int(px["fw"], 0)
+          :y -> int(px["fy"], 0) + int(px["fh"], 0)
+        end
+      end)
+      |> Enum.max(fn -> 0 end)
+
+    # Floor the extent at 0 first — a tampered/legacy negative stored fx/fw could
+    # make the extent (and so the upper bound) negative, and clamp(fx, 0, neg)
+    # would then persist a negative position, violating the >= 0 invariant.
+    min(max(extent, 0) + @free_max_px, @free_max_pos)
   end
 
   @doc """
@@ -927,8 +959,8 @@ defmodule PhoenixKitDashboards.Dashboards do
   """
   @spec set_layout_view(Dashboard.t(), instance_id :: String.t(), String.t(), String.t()) ::
           {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
-  def set_layout_view(%Dashboard{} = dashboard, instance_id, bp, view)
-      when is_binary(bp) and is_binary(view) do
+  def set_layout_view(%Dashboard{} = dashboard, instance_id, layout_id, view)
+      when is_binary(layout_id) and is_binary(view) do
     case Enum.find(dashboard.layout, &(&1["id"] == instance_id)) do
       nil ->
         {:ok, dashboard}
@@ -938,10 +970,17 @@ defmodule PhoenixKitDashboards.Dashboards do
           # Store the override, then grow the placement on THIS layout to the
           # new view's minimum (text clock → analog needs more rows) — the
           # same growth configure_widget applies for instance-level switches.
-          inst = Layout.put_placement(inst, bp, %{"view" => view})
+          inst = Layout.put_placement(inst, layout_id, %{"view" => view})
           layout = swap_item(dashboard.layout, instance_id, inst)
-          {min, _max} = size_bounds(inst, bp)
-          layout = swap_item(layout, instance_id, grow_on_tier(dashboard, inst, bp, min, layout))
+          {min, _max} = Sizing.bounds(inst, layout_id)
+
+          layout =
+            swap_item(
+              layout,
+              instance_id,
+              grow_on_layout(dashboard, inst, layout_id, min, layout)
+            )
+
           save_layout(dashboard, layout)
         else
           {:ok, dashboard}
@@ -1000,7 +1039,11 @@ defmodule PhoenixKitDashboards.Dashboards do
     |> log_on_ok("dashboard.widget_removed", opts, %{"instance_id" => instance_id})
   end
 
-  @doc "Replace the settings map of a single widget instance."
+  @doc """
+  Replace a single widget instance's settings map. Thin convenience alias for
+  `configure_widget/4` (the canonical config API) — kept as public API so host
+  code from earlier releases keeps working.
+  """
   @spec update_widget_settings(Dashboard.t(), instance_id :: String.t(), map(), keyword()) ::
           {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def update_widget_settings(%Dashboard{} = dashboard, instance_id, settings, opts \\ []) do
@@ -1016,7 +1059,11 @@ defmodule PhoenixKitDashboards.Dashboards do
   @spec configure_widget(
           Dashboard.t(),
           instance_id :: String.t(),
-          %{optional(:settings) => map(), optional(:view) => String.t() | nil},
+          %{
+            optional(:settings) => map(),
+            optional(:view) => String.t() | nil,
+            optional(:min_override) => boolean()
+          },
           keyword()
         ) :: {:ok, Dashboard.t()} | {:error, :stale | Ecto.Changeset.t()}
   def configure_widget(%Dashboard{} = dashboard, instance_id, attrs, opts \\ [])
@@ -1092,21 +1139,21 @@ defmodule PhoenixKitDashboards.Dashboards do
   end
 
   # Switching to a view with a larger minimum (e.g. text clock → analog) grows
-  # every stored placement of that instance to meet it — per tier, and only
-  # where the grid has room: a blocked or edge-tight tier keeps its size (the
+  # every stored placement of that instance to meet it — per layout, and only
+  # where the grid has room: a blocked or edge-tight layout keeps its size (the
   # view still renders, just smaller than its ideal floor).
   defp grow_for_view(dashboard, layout, instance_id) do
     case Enum.find(layout, &(&1["id"] == instance_id)) do
       nil -> layout
-      item -> swap_item(layout, instance_id, grow_all_tiers(dashboard, item, layout))
+      item -> swap_item(layout, instance_id, grow_all_layouts(dashboard, item, layout))
     end
   end
 
-  defp grow_all_tiers(dashboard, item, layout) do
+  defp grow_all_layouts(dashboard, item, layout) do
     # Per-layout: each layout may show a different view with its own minimum.
-    Enum.reduce(Map.keys(item["bp"] || %{}), item, fn bp, item ->
-      {min, _max} = size_bounds(item, bp)
-      grow_on_tier(dashboard, item, bp, min, layout)
+    Enum.reduce(Map.keys(item["bp"] || %{}), item, fn layout_id, item ->
+      {min, _max} = Sizing.bounds(item, layout_id)
+      grow_on_layout(dashboard, item, layout_id, min, layout)
     end)
   end
 
@@ -1114,9 +1161,9 @@ defmodule PhoenixKitDashboards.Dashboards do
     Enum.map(layout, fn i -> if i["id"] == instance_id, do: replacement, else: i end)
   end
 
-  defp grow_on_tier(dashboard, item, bp, min, layout) do
-    cols = grid_cols(dashboard, bp)
-    p = Layout.placement(item, bp)
+  defp grow_on_layout(dashboard, item, layout_id, min, layout) do
+    cols = grid_cols(dashboard, layout_id)
+    p = Layout.placement(item, layout_id)
     w = max(p["w"], min(min.w, cols))
     h = max(p["h"], min.h)
 
@@ -1128,11 +1175,11 @@ defmodule PhoenixKitDashboards.Dashboards do
         others =
           layout
           |> Enum.reject(&(&1["id"] == item["id"]))
-          |> Enum.map(&Layout.placement(&1, bp))
+          |> Enum.map(&Layout.placement(&1, layout_id))
 
-        if p["x"] + w <= cols and p["y"] + h <= grid_rows(dashboard, bp) and
+        if p["x"] + w <= cols and p["y"] + h <= grid_rows(dashboard, layout_id) and
              not Grid.collides?(p["x"], p["y"], w, h, others) do
-          Layout.put_placement(item, bp, %{"w" => w, "h" => h})
+          Layout.put_placement(item, layout_id, %{"w" => w, "h" => h})
         else
           item
         end
@@ -1140,7 +1187,7 @@ defmodule PhoenixKitDashboards.Dashboards do
       true ->
         # Order-only legacy placement — no cells to collide with yet; the packer
         # places the grown span on next render.
-        Layout.put_placement(item, bp, %{"w" => w, "h" => h})
+        Layout.put_placement(item, layout_id, %{"w" => w, "h" => h})
     end
   end
 
@@ -1221,7 +1268,17 @@ defmodule PhoenixKitDashboards.Dashboards do
       {count, _} =
         Dashboard
         |> where([d], d.uuid == ^original.uuid)
-        |> where([d], fragment("coalesce((?->>'rev')::int, 0)", d.config) == ^expected)
+        # Guard the ::int cast with a digit-only regex so a tampered/corrupt
+        # non-numeric stored rev matches as 0 (like rev/1 treats it) instead of
+        # raising an uncaught "invalid input syntax for integer" DB error.
+        |> where(
+          [d],
+          fragment(
+            "(case when (?->>'rev') ~ '^[0-9]+$' then (?->>'rev')::int else 0 end)",
+            d.config,
+            d.config
+          ) == ^expected
+        )
         |> repo().update_all(set: set)
 
       if count == 1 do
@@ -1256,9 +1313,9 @@ defmodule PhoenixKitDashboards.Dashboards do
   # A designed layout: stored explicit cells render verbatim; order-only
   # placements (pre-cells data, or none at all) pack into the remaining free
   # cells in `pos` order. Reading-order output.
-  defp resolve_designed(dashboard, bp) do
-    cols = grid_cols(dashboard, bp)
-    rows = grid_rows(dashboard, bp)
+  defp resolve_designed(dashboard, layout_id) do
+    cols = grid_cols(dashboard, layout_id)
+    rows = grid_rows(dashboard, layout_id)
 
     entries =
       dashboard.layout
@@ -1266,9 +1323,9 @@ defmodule PhoenixKitDashboards.Dashboards do
       |> Enum.map(fn {item, idx} ->
         placement =
           item
-          |> Layout.placement(bp)
+          |> Layout.placement(layout_id)
           |> Map.put_new("pos", idx)
-          |> default_span(item, bp)
+          |> default_span(item, layout_id)
 
         {item, placement}
       end)
@@ -1276,16 +1333,16 @@ defmodule PhoenixKitDashboards.Dashboards do
     {placed, unplaced} =
       Enum.split_with(entries, fn {_item, p} -> is_integer(p["x"]) and is_integer(p["y"]) end)
 
-    {packed, _occupied} =
-      unplaced
-      |> Enum.sort_by(fn {_item, p} -> p["pos"] end)
-      |> Enum.map_reduce(Enum.map(placed, fn {_i, p} -> p end), fn {item, p}, occupied ->
-        w = p["w"] |> max(1) |> min(cols)
-        h = p["h"] |> max(1) |> min(rows)
-        {x, y} = Grid.first_free(occupied, w, h, cols, rows) || {0, Grid.below_all(occupied)}
-        p2 = Map.merge(p, %{"x" => x, "y" => y, "w" => w, "h" => h})
-        {{item, p2}, [p2 | occupied]}
-      end)
+    # Pack the order-only widgets (in `pos` order) around the already-placed
+    # ones via the shared Grid primitive, then re-pair each result with its item.
+    sorted = Enum.sort_by(unplaced, fn {_item, p} -> p["pos"] end)
+
+    packed =
+      sorted
+      |> Enum.map(fn {_item, p} -> p end)
+      |> Grid.pack(Enum.map(placed, fn {_i, p} -> p end), cols, rows)
+      |> then(&Enum.zip(sorted, &1))
+      |> Enum.map(fn {{item, _p}, p2} -> {item, p2} end)
 
     Enum.sort_by(placed ++ packed, fn {_item, p} -> {p["y"], p["x"], p["pos"]} end)
   end
@@ -1293,8 +1350,8 @@ defmodule PhoenixKitDashboards.Dashboards do
   # A widget with no stored span for this layout packs at its TYPE's default
   # size (layouts are independent — no cross-layout derivation). Layout's own
   # w/h fallback only ever shows for widgets whose module is uninstalled.
-  defp default_span(placement, item, bp) do
-    stored = get_in(item, ["bp", bp]) || %{}
+  defp default_span(placement, item, layout_id) do
+    stored = get_in(item, ["bp", layout_id]) || %{}
 
     case Registry.get(item["widget_key"]) do
       %Widget{default_size: default} ->
@@ -1307,17 +1364,21 @@ defmodule PhoenixKitDashboards.Dashboards do
     end
   end
 
-  # Before ANY grid edit at `bp`, pin every widget's currently-resolved placement
+  # Before ANY grid edit at `layout_id`, pin every widget's currently-resolved placement
   # (explicit cells included) into that layout — so editing one widget can't
   # shift the others (they're anchored where the user sees them), whether the
-  # tier was deriving or holds pre-cells order-only data. No-op once every
+  # layout was deriving or holds pre-cells order-only data. No-op once every
   # widget has stored cells.
-  defp materialize_grid(%Dashboard{} = dashboard, bp) do
-    if grid_materialized?(dashboard, bp) do
+  defp materialize_grid(%Dashboard{} = dashboard, layout_id) do
+    if grid_materialized?(dashboard, layout_id) do
       dashboard
     else
-      resolved = Map.new(resolve_items(dashboard, bp), fn {item, p} -> {item["id"], p} end)
-      %{dashboard | layout: Enum.map(dashboard.layout, &materialize_item(&1, bp, resolved))}
+      resolved = Map.new(resolve_items(dashboard, layout_id), fn {item, p} -> {item["id"], p} end)
+
+      %{
+        dashboard
+        | layout: Enum.map(dashboard.layout, &materialize_item(&1, layout_id, resolved))
+      }
     end
   end
 
@@ -1328,10 +1389,10 @@ defmodule PhoenixKitDashboards.Dashboards do
     end)
   end
 
-  defp materialize_item(item, bp, resolved) do
+  defp materialize_item(item, layout_id, resolved) do
     case resolved[item["id"]] do
       nil -> item
-      placement -> Layout.put_placement(item, bp, placement)
+      placement -> Layout.put_placement(item, layout_id, placement)
     end
   end
 
@@ -1356,31 +1417,10 @@ defmodule PhoenixKitDashboards.Dashboards do
     |> persist()
   end
 
-  # Min/max span bounds for an INSTANCE — the min comes from its selected view
-  # when that view declares one (`Widget.min_size_for/2`; an analog clock has a
-  # squarer floor than a text one). The per-instance `min_override` drops the
-  # floor to 1x1: minimums are RECOMMENDATIONS (content renders degraded below
-  # them), and a user cramming a dense dashboard may opt out. Falls back to
-  # sane defaults when the type is unknown (a stale instance whose provider was
-  # uninstalled).
-  defp size_bounds(item, bp) do
-    case Registry.get(item["widget_key"]) do
-      %Widget{} = widget -> {instance_min(item, bp, widget), widget.max_size}
-      _ -> {%{w: 1, h: 1}, %{w: Lattice.max_dim(), h: Lattice.max_dim()}}
-    end
-  end
-
-  defp instance_min(%{"min_override" => true}, _bp, _widget), do: %{w: 1, h: 1}
-  defp instance_min(item, bp, widget), do: Widget.min_size_for(widget, Layout.view(item, bp))
-
-  defp clamp(value, lo, hi) when is_integer(value), do: value |> max(lo) |> min(hi)
-  defp clamp(_value, lo, _hi), do: lo
-
-  # Coerce a stored geometry value to an integer (tampered/legacy JSONB may
-  # carry a string or float where an int is expected).
-  defp int(v, _default) when is_integer(v), do: v
-  defp int(v, _default) when is_float(v), do: trunc(v)
-  defp int(_v, default), do: default
+  # Clamp + integer coercion delegate to the single Lattice implementation (was
+  # a divergent local copy — see Sizing / Lattice for the consolidation).
+  defp clamp(value, lo, hi), do: Lattice.clamp(value, lo, hi)
+  defp int(v, default), do: Lattice.to_int(v, default)
 
   # Log a business-level activity on the {:ok, dashboard} branch only, passing
   # through the original result. Guarded + rescued so a logging failure never

@@ -5,11 +5,11 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
 
   This is the worked example for the richer parts of the widget contract:
 
-    * **Views with per-view minimums** — `"normal"` (time + date), `"digital"`
-      (large LCD-style digits) and `"analog"` (an SVG face) each declare their
-      own `min_size`: the analog face needs a squarer box (2×2) than a line of
-      digits (3×1). Resize limits, the settings modal, and view switching all
-      honour the selected view's floor.
+    * **Views with per-view minimums** — `"normal"` (time + date, 8×4),
+      `"digital"` (large LCD-style digits, 12×4) and `"analog"` (an SVG face,
+      8×8 — the squarer floor a round face needs) each declare their own
+      `min_size` in lattice units. Resize limits, the settings modal, and view
+      switching all honour the selected view's floor.
     * **Per-instance settings** — every placed clock has its own `"timezone"`
       and a `"show_timezone"` toggle (hide the label when a single local clock
       doesn't need it), so one dashboard can carry a world-clock row.
@@ -155,7 +155,8 @@ defmodule PhoenixKitDashboards.Widgets.ClockWidget do
   # The SVG face fills whatever box the instance has, letterboxed square by the
   # viewBox — so "analog wants a square" is a soft preference the per-view
   # min_size nudges toward, not a hard aspect lock the grid can't express
-  # (cells aren't square: column and row strides differ per tier).
+  # (lattice cells are nominally square, but a per-axis stretch-fit can leave
+  # column and row strides slightly different).
   attr(:now, DateTime, required: true)
 
   defp analog_face(assigns) do

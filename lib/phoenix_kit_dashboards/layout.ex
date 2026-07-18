@@ -37,16 +37,21 @@ defmodule PhoenixKitDashboards.Layout do
 
   @doc "The widget's grid placement (`w/h/hidden`) for a layout, defaulted."
   @spec placement(map(), String.t()) :: %{optional(String.t()) => term()}
-  def placement(item, bp) when is_map(item) and is_binary(bp) do
-    stored = get_in(item, ["bp", bp]) || take(item, ~w(w h hidden))
+  def placement(item, layout_id) when is_map(item) and is_binary(layout_id) do
+    stored = get_in(item, ["bp", layout_id]) || take(item, ~w(w h hidden))
     Map.merge(@grid_defaults, stored)
   end
 
   @doc "Set a layout's grid placement, upgrading the item to nested shape."
   @spec put_placement(map(), String.t(), map()) :: map()
-  def put_placement(item, bp, attrs) when is_binary(bp) and is_map(attrs) do
+  def put_placement(item, layout_id, attrs) when is_binary(layout_id) and is_map(attrs) do
     bpmap = Map.get(item, "bp", %{})
-    Map.put(item, "bp", Map.put(bpmap, bp, Map.merge(placement(item, bp), stringify(attrs))))
+
+    Map.put(
+      item,
+      "bp",
+      Map.put(bpmap, layout_id, Map.merge(placement(item, layout_id), stringify(attrs)))
+    )
   end
 
   @doc """
@@ -55,13 +60,13 @@ defmodule PhoenixKitDashboards.Layout do
   the phone), else the instance default.
   """
   @spec view(map(), String.t()) :: String.t() | nil
-  def view(item, bp) when is_map(item) and is_binary(bp) do
-    get_in(item, ["bp", bp, "view"]) || item["view"]
+  def view(item, layout_id) when is_map(item) and is_binary(layout_id) do
+    get_in(item, ["bp", layout_id, "view"]) || item["view"]
   end
 
   @doc "Whether the widget is hidden on a layout."
   @spec hidden?(map(), String.t()) :: boolean()
-  def hidden?(item, bp), do: placement(item, bp)["hidden"] == true
+  def hidden?(item, layout_id), do: placement(item, layout_id)["hidden"] == true
 
   # Pick the given string keys that exist with a value, as a string-keyed map.
   defp take(item, keys) do
