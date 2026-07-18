@@ -32,7 +32,7 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(:page_title, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboards"))
+     |> assign(:page_title, gettext("Dashboards"))
      |> load_dashboards()}
   end
 
@@ -48,7 +48,7 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
          put_flash(
            socket,
            :error,
-           Gettext.gettext(PhoenixKitWeb.Gettext, "Could not clone dashboard.")
+           gettext("Could not clone dashboard.")
          )}
     end
   end
@@ -63,7 +63,7 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
          {:ok, _} <- Dashboards.delete(dashboard, actor_opts(socket)) do
       {:noreply,
        socket
-       |> put_flash(:info, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard deleted."))
+       |> put_flash(:info, gettext("Dashboard deleted."))
        |> load_dashboards()}
     else
       _ ->
@@ -71,7 +71,7 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
          put_flash(
            socket,
            :error,
-           Gettext.gettext(PhoenixKitWeb.Gettext, "Could not delete dashboard.")
+           gettext("Could not delete dashboard.")
          )}
     end
   end
@@ -109,8 +109,8 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
 
   defp type_label(dashboard) do
     case Dashboard.type(dashboard) do
-      "pixel" -> Gettext.gettext(PhoenixKitWeb.Gettext, "Pixel")
-      _ -> Gettext.gettext(PhoenixKitWeb.Gettext, "Grid")
+      "pixel" -> gettext("Pixel")
+      _ -> gettext("Grid")
     end
   end
 
@@ -123,7 +123,7 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
       <div class="flex items-center justify-end">
         <.link navigate={Paths.new()} class="btn btn-primary btn-sm">
           <.icon name="hero-plus" class="w-4 h-4" />
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "Create dashboard")}
+          {gettext("Create dashboard")}
         </.link>
       </div>
 
@@ -131,11 +131,11 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
         :if={@dashboards == []}
         variant="featured"
         icon="hero-squares-2x2"
-        title={Gettext.gettext(PhoenixKitWeb.Gettext, "No dashboards yet.")}
+        title={gettext("No dashboards yet.")}
       >
         <.link navigate={Paths.new()} class="btn btn-primary btn-sm">
           <.icon name="hero-plus" class="w-4 h-4" />
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "Create your first dashboard")}
+          {gettext("Create your first dashboard")}
         </.link>
       </.empty_state>
 
@@ -174,34 +174,34 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
             <div class="card-actions items-center justify-end mt-2">
               <.link navigate={Paths.builder(dashboard.uuid)} class="btn btn-outline btn-xs">
                 <.icon name="hero-pencil-square" class="w-3 h-3" />
-                {Gettext.gettext(PhoenixKitWeb.Gettext, "Open")}
+                {gettext("Open")}
               </.link>
               <.table_row_menu
                 id={"dashboard-menu-#{dashboard.uuid}"}
-                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Actions")}
+                label={gettext("Actions")}
               >
                 <.table_row_menu_link
                   :if={manageable_by?(dashboard, @current_user_uuid)}
                   navigate={Paths.edit(dashboard.uuid)}
                   icon="hero-pencil"
-                  label={Gettext.gettext(PhoenixKitWeb.Gettext, "Edit")}
+                  label={gettext("Edit")}
                 />
                 <.table_row_menu_button
                   phx-click="clone"
                   phx-value-uuid={dashboard.uuid}
-                  phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Cloning…")}
+                  phx-disable-with={gettext("Cloning…")}
                   icon="hero-document-duplicate"
-                  label={Gettext.gettext(PhoenixKitWeb.Gettext, "Clone")}
+                  label={gettext("Clone")}
                 />
                 <.table_row_menu_divider :if={manageable_by?(dashboard, @current_user_uuid)} />
                 <.table_row_menu_button
                   :if={manageable_by?(dashboard, @current_user_uuid)}
                   phx-click="delete"
                   phx-value-uuid={dashboard.uuid}
-                  data-confirm={Gettext.gettext(PhoenixKitWeb.Gettext, "Delete this dashboard?")}
-                  phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Deleting…")}
+                  data-confirm={gettext("Delete this dashboard?")}
+                  phx-disable-with={gettext("Deleting…")}
                   icon="hero-trash"
-                  label={Gettext.gettext(PhoenixKitWeb.Gettext, "Delete")}
+                  label={gettext("Delete")}
                   variant="error"
                 />
               </.table_row_menu>

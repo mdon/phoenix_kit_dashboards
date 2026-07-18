@@ -27,6 +27,7 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
   it on that cadence — the widget never subscribes/times itself.
   """
   use Phoenix.LiveComponent
+  use Gettext, backend: PhoenixKitWeb.Gettext
 
   import PhoenixKitWeb.Components.Core.Markdown, only: [markdown: 1]
 
@@ -97,7 +98,7 @@ defmodule PhoenixKitDashboards.Widgets.NoteWidget do
       <div class="card-body flex h-full min-h-0 flex-col gap-1 overflow-hidden p-3">
         <h3 class="card-title text-[8cqmin] leading-tight">{@title}</h3>
         <p :if={@body == ""} class="text-[6cqmin] text-base-content/70">
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "Empty note — open settings to add text.")}
+          {gettext("Empty note — open settings to add text.")}
         </p>
         <%!-- prose children are em-based, so scaling the prose ROOT font
         scales the whole rendered markdown. `.prose` sets its own root size,

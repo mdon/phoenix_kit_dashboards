@@ -62,7 +62,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
           class="pk-empty-hint flex flex-1 flex-col items-center justify-center bg-base-200 text-base-content/40"
         >
           <.icon name="hero-squares-plus" class="w-12 h-12" />
-          <p class="mt-2">{Gettext.gettext(PhoenixKitWeb.Gettext, "Add widgets from the panel on the right.")}</p>
+          <p class="mt-2">{gettext("Add widgets from the panel on the right.")}</p>
         </div>
 
         <.grid_mode
@@ -98,7 +98,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
       pop a scrollbar for as long as a tab is held down. --%>
       <div
         role="tablist"
-        aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard layouts")}
+        aria-label={gettext("Dashboard layouts")}
         class="flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden"
       >
         <%= for entry <- @entries do %>
@@ -141,8 +141,8 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
           type="button"
           phx-click="add_layout"
           class="btn btn-ghost btn-xs btn-square shrink-0"
-          title={Gettext.gettext(PhoenixKitWeb.Gettext, "Add a layout (copies the current one)")}
-          aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Add layout")}
+          title={gettext("Add a layout (copies the current one)")}
+          aria-label={gettext("Add layout")}
         >
           <.icon name="hero-plus" class="w-3.5 h-3.5" />
         </button>
@@ -156,8 +156,8 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
           type="button"
           tabindex="0"
           class="btn btn-ghost btn-xs btn-square"
-          title={Gettext.gettext(PhoenixKitWeb.Gettext, "Layout settings")}
-          aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Layout settings")}
+          title={gettext("Layout settings")}
+          aria-label={gettext("Layout settings")}
         >
           <.icon name="hero-cog-6-tooth" class="w-4 h-4" />
         </button>
@@ -166,7 +166,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
             <li>
               <button type="button" phx-click="start_rename_layout" phx-value-id={@active_layout}>
                 <.icon name="hero-pencil" class="w-3.5 h-3.5" />
-                {Gettext.gettext(PhoenixKitWeb.Gettext, "Rename")}
+                {gettext("Rename")}
               </button>
             </li>
             <li :if={length(@entries) > 1}>
@@ -175,15 +175,13 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
                 phx-click="delete_layout"
                 phx-value-id={@active_layout}
                 data-confirm={
-                  Gettext.gettext(
-                    PhoenixKitWeb.Gettext,
-                    "Delete this layout? Its placements are removed; the widgets stay available in the other layouts."
+                  gettext("Delete this layout? Its placements are removed; the widgets stay available in the other layouts."
                   )
                 }
                 class="text-error"
               >
                 <.icon name="hero-trash" class="w-3.5 h-3.5" />
-                {Gettext.gettext(PhoenixKitWeb.Gettext, "Delete")}
+                {gettext("Delete")}
               </button>
             </li>
           </ul>
@@ -191,7 +189,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
           <div class="divider my-1"></div>
 
           <div class="px-1 pb-1.5 text-xs font-medium text-base-content/50">
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "Grid size (columns × rows)")}
+            {gettext("Grid size (columns × rows)")}
           </div>
           <form id="grid-dims" phx-change="set_dims" class="flex items-center gap-2 px-1">
             <input
@@ -201,7 +199,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
               min={Lattice.min_dim()}
               max={Lattice.max_dim()}
               class="input input-sm w-20 text-center tabular-nums"
-              aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Columns")}
+              aria-label={gettext("Columns")}
             />
             <span class="text-base-content/40">×</span>
             <input
@@ -211,7 +209,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
               min={Lattice.min_dim()}
               max={Lattice.max_dim()}
               class="input input-sm w-20 text-center tabular-nums"
-              aria-label={Gettext.gettext(PhoenixKitWeb.Gettext, "Rows")}
+              aria-label={gettext("Rows")}
             />
           </form>
           <button
@@ -220,14 +218,12 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
             phx-hook="DashboardFitScreen"
             class="btn btn-ghost btn-sm mt-1.5 w-full justify-start gap-2"
             title={
-              Gettext.gettext(
-                PhoenixKitWeb.Gettext,
-                "Resize this layout's grid to match the screen you're viewing on"
+              gettext("Resize this layout's grid to match the screen you're viewing on"
               )
             }
           >
             <.icon name="hero-viewfinder-circle" class="w-4 h-4" />
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "Fit this screen")}
+            {gettext("Fit this screen")}
           </button>
         </div>
       </div>
@@ -235,7 +231,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
       <div class="ml-auto flex items-center gap-3">
         <label class="flex cursor-pointer items-center gap-1.5">
           <span class="text-xs font-medium text-base-content/50">
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "Show grid")}
+            {gettext("Show grid")}
           </span>
           <input
             type="checkbox"
@@ -296,7 +292,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
         >
           <.icon name="hero-squares-plus" class="w-12 h-12" />
           <p class="mt-2">
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "Add widgets from the panel on the right.")}
+            {gettext("Add widgets from the panel on the right.")}
           </p>
         </div>
         <%!-- No-JS fallback: the canvas starts hidden (the pre-fit frame must
@@ -491,7 +487,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
             phx-value-id={@inst["id"]}
             phx-value-dir="front"
             class="btn btn-ghost btn-xs btn-square"
-            title={Gettext.gettext(PhoenixKitWeb.Gettext, "Bring to front")}
+            title={gettext("Bring to front")}
           >
             <.icon name="hero-chevron-double-up" class="w-3.5 h-3.5" />
           </button>
@@ -502,7 +498,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
             phx-value-id={@inst["id"]}
             phx-value-dir="back"
             class="btn btn-ghost btn-xs btn-square"
-            title={Gettext.gettext(PhoenixKitWeb.Gettext, "Send to back")}
+            title={gettext("Send to back")}
           >
             <.icon name="hero-chevron-double-down" class="w-3.5 h-3.5" />
           </button>
@@ -514,7 +510,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
             phx-click="cycle_view"
             phx-value-id={@inst["id"]}
             class="btn btn-ghost btn-xs btn-square"
-            title={"#{Gettext.gettext(PhoenixKitWeb.Gettext, "View")}: #{@view_name} — #{Gettext.gettext(PhoenixKitWeb.Gettext, "click to cycle")}"}
+            title={"#{gettext("View")}: #{@view_name} — #{gettext("click to cycle")}"}
           >
             <.icon name="hero-eye" class="w-3.5 h-3.5" />
           </button>
@@ -523,7 +519,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
             phx-click="open_settings"
             phx-value-id={@inst["id"]}
             class="btn btn-ghost btn-xs btn-square"
-            title={Gettext.gettext(PhoenixKitWeb.Gettext, "Settings")}
+            title={gettext("Settings")}
           >
             <.icon name="hero-cog-6-tooth" class="w-3.5 h-3.5" />
           </button>
@@ -532,9 +528,9 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
             phx-click="remove_widget"
             phx-value-id={@inst["id"]}
             phx-disable-with="…"
-            data-confirm={Gettext.gettext(PhoenixKitWeb.Gettext, "Remove this widget?")}
+            data-confirm={gettext("Remove this widget?")}
             class="btn btn-ghost btn-xs btn-square text-error"
-            title={Gettext.gettext(PhoenixKitWeb.Gettext, "Remove")}
+            title={gettext("Remove")}
           >
             <.icon name="hero-x-mark" class="w-3.5 h-3.5" />
           </button>
@@ -550,7 +546,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
       </div>
       <span
         class="pk-resize-handle absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize touch-none opacity-0 transition-opacity group-hover/widget:opacity-100"
-        title={Gettext.gettext(PhoenixKitWeb.Gettext, "Drag to resize")}
+        title={gettext("Drag to resize")}
       >
         <svg viewBox="0 0 10 10" class="h-full w-full text-base-content/40" aria-hidden="true">
           <path d="M9 1v8H1" fill="none" stroke="currentColor" stroke-width="1.2" />
@@ -634,7 +630,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
   defp grip_class("free"), do: "pk-free-handle"
   defp grip_class(_grid), do: "pk-drag-handle"
 
-  defp grip_title(_mode), do: Gettext.gettext(PhoenixKitWeb.Gettext, "Drag to move")
+  defp grip_title(_mode), do: gettext("Drag to move")
 
   # Free/pixel canvas: absolute px placement — no grid, no snap. `z` orders
   # deliberately-overlapping widgets (restack_widget).
@@ -701,16 +697,14 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
     ~H"""
     <div :if={is_nil(@widget)} class="card bg-base-100 h-full">
       <div class="card-body p-4 text-sm text-base-content/50">
-        {Gettext.gettext(PhoenixKitWeb.Gettext, "Unknown widget")}: {@inst["widget_key"]}
+        {gettext("Unknown widget")}: {@inst["widget_key"]}
       </div>
     </div>
     <div :if={@widget && !@available} class="card bg-base-100 h-full">
       <div class="card-body p-4 items-center justify-center text-center text-sm text-base-content/50">
         <.icon name="hero-lock-closed" class="w-5 h-5" />
         <span>
-          {@widget.name} — {Gettext.gettext(
-            PhoenixKitWeb.Gettext,
-            "unavailable (module disabled or access restricted)."
+          {@widget.name} — {gettext("unavailable (module disabled or access restricted)."
           )}
         </span>
       </div>
@@ -752,13 +746,13 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
     >
       <div class="flex items-center justify-between border-b border-base-300 p-3">
         <span class="text-sm font-semibold">
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "Widget catalog")}
+          {gettext("Widget catalog")}
         </span>
         <button
           type="button"
           phx-click={JS.hide(to: "#dashboard-catalog")}
           class="btn btn-ghost btn-xs btn-square"
-          title={Gettext.gettext(PhoenixKitWeb.Gettext, "Close")}
+          title={gettext("Close")}
         >
           <.icon name="hero-x-mark" class="w-4 h-4" />
         </button>
@@ -776,7 +770,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
             data-widget-key={widget.key}
             data-w={widget.default_size.w}
             data-h={widget.default_size.h}
-            title={Gettext.gettext(PhoenixKitWeb.Gettext, "Click to add, or drag onto the dashboard")}
+            title={gettext("Click to add, or drag onto the dashboard")}
             class="text-left p-2 rounded hover:bg-base-200 flex gap-2 items-start cursor-grab"
           >
             <.icon name={widget.icon} class="w-5 h-5 mt-0.5 text-base-content/60" />
@@ -816,7 +810,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
 
   defp provider_label(_widget), do: builtin_label()
 
-  defp builtin_label, do: Gettext.gettext(PhoenixKitWeb.Gettext, "Built-in")
+  defp builtin_label, do: gettext("Built-in")
 
   # Settings form generated from the widget type's settings_schema.
   attr(:instance, :map, required: true)
@@ -855,7 +849,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
     ~H"""
     <.modal show={true} on_close="close_settings" id="widget-settings-modal">
       <:title>
-        {Gettext.gettext(PhoenixKitWeb.Gettext, "Widget settings")}
+        {gettext("Widget settings")}
         <span :if={@widget} class="text-base-content/50 text-sm">
           — {translate_catalog(@widget.name)}
         </span>
@@ -865,15 +859,15 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
           <.select
             :if={@widget && @widget.views != []}
             name="view"
-            label={Gettext.gettext(PhoenixKitWeb.Gettext, "View")}
+            label={gettext("View")}
             value={(@grid_placement || %{})["view"] || @instance["view"]}
             options={Enum.map(@widget.views, fn v -> {translate_catalog(v.name), v.key} end)}
           />
           <div :if={@widget}>
             <span class="label-text text-sm">
               {if @free?,
-                do: Gettext.gettext(PhoenixKitWeb.Gettext, "Size & position (px)"),
-                else: Gettext.gettext(PhoenixKitWeb.Gettext, "Size")}
+                do: gettext("Size & position (px)"),
+                else: gettext("Size")}
             </span>
             <div :if={@free?} class="grid grid-cols-4 items-end gap-2">
               <.input
@@ -882,7 +876,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
                 value={@fw}
                 min={@free_min_px}
                 max={@free_max_px}
-                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Width")}
+                label={gettext("Width")}
               />
               <.input
                 type="number"
@@ -890,21 +884,21 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
                 value={@fh}
                 min={@free_min_px}
                 max={@free_max_px}
-                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Height")}
+                label={gettext("Height")}
               />
               <.input
                 type="number"
                 name="fx"
                 value={@fx}
                 min="0"
-                label={Gettext.gettext(PhoenixKitWeb.Gettext, "X")}
+                label={gettext("X")}
               />
               <.input
                 type="number"
                 name="fy"
                 value={@fy}
                 min="0"
-                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Y")}
+                label={gettext("Y")}
               />
             </div>
             <div :if={!@free?} class="grid grid-cols-4 items-end gap-2">
@@ -917,7 +911,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
                 value={@grid_w}
                 min="1"
                 max={@limits.max_w}
-                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Width")}
+                label={gettext("Width")}
               />
               <.input
                 type="number"
@@ -925,7 +919,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
                 value={@grid_h}
                 min="1"
                 max={@limits.max_h}
-                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Height")}
+                label={gettext("Height")}
               />
               <%!-- Column/Row maxima are HTML-permissive too: a tight max is
               computed from the CURRENT width, so "shrink + move right" in one
@@ -936,7 +930,7 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
                 value={@grid_x}
                 min="1"
                 max={@cols}
-                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Column")}
+                label={gettext("Column")}
               />
               <.input
                 type="number"
@@ -944,29 +938,25 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
                 value={@grid_y}
                 min="1"
                 max={@max_rows}
-                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Row")}
+                label={gettext("Row")}
               />
             </div>
             <div :if={!@free?} class="mt-2">
               <.checkbox
                 name="min_override"
-                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Allow smaller than recommended")}
+                label={gettext("Allow smaller than recommended")}
                 checked={@instance["min_override"] == true}
               />
               <p class="mt-0.5 text-xs text-base-content/50">
-                {Gettext.gettext(
-                  PhoenixKitWeb.Gettext,
-                  "Drops this widget's minimum size to 1×1 — it may render cramped below the recommended size."
+                {gettext("Drops this widget's minimum size to 1×1 — it may render cramped below the recommended size."
                 )}
               </p>
             </div>
             <p class="mt-1 text-xs text-base-content/50">
               {if @free?,
-                do: Gettext.gettext(PhoenixKitWeb.Gettext, "Tip: drag the bottom-right corner to resize."),
+                do: gettext("Tip: drag the bottom-right corner to resize."),
                 else:
-                  Gettext.gettext(
-                    PhoenixKitWeb.Gettext,
-                    "Tip: drag the widget by its grip to any cell; drag the bottom-right corner to resize."
+                  gettext("Tip: drag the widget by its grip to any cell; drag the bottom-right corner to resize."
                   )}
             </p>
           </div>
@@ -983,15 +973,15 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
       The submit stays associated with the form via the form= attribute. --%>
       <:actions>
         <button type="button" phx-click="close_settings" class="btn btn-ghost btn-sm">
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "Cancel")}
+          {gettext("Cancel")}
         </button>
         <button
           type="submit"
           form="widget-settings-form"
-          phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Saving…")}
+          phx-disable-with={gettext("Saving…")}
           class="btn btn-primary btn-sm"
         >
-          {Gettext.gettext(PhoenixKitWeb.Gettext, "Save")}
+          {gettext("Save")}
         </button>
       </:actions>
     </.modal>

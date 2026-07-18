@@ -95,7 +95,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       nil ->
         {:noreply,
          socket
-         |> put_flash(:error, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard not found."))
+         |> put_flash(:error, gettext("Dashboard not found."))
          |> push_navigate(to: Paths.index())}
 
       dashboard ->
@@ -111,7 +111,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
            socket
            |> put_flash(
              :error,
-             Gettext.gettext(PhoenixKitWeb.Gettext, "You do not have access to this dashboard.")
+             gettext("You do not have access to this dashboard.")
            )
            |> push_navigate(to: Paths.index())}
         end
@@ -158,7 +158,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
       nil ->
         {:noreply,
          socket
-         |> put_flash(:error, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard not found."))
+         |> put_flash(:error, gettext("Dashboard not found."))
          |> push_navigate(to: Paths.index())}
 
       dashboard ->
@@ -175,7 +175,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
            socket
            |> put_flash(
              :error,
-             Gettext.gettext(PhoenixKitWeb.Gettext, "You do not have access to this dashboard.")
+             gettext("You do not have access to this dashboard.")
            )
            |> push_navigate(to: Paths.index())}
         end
@@ -354,7 +354,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
          put_flash(
            socket,
            :error,
-           Gettext.gettext(PhoenixKitWeb.Gettext, "A dashboard needs at least one layout.")
+           gettext("A dashboard needs at least one layout.")
          )}
 
       {:error, _} ->
@@ -520,7 +520,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
            put_flash(
              socket,
              :error,
-             Gettext.gettext(PhoenixKitWeb.Gettext, "This widget is not available to you.")
+             gettext("This widget is not available to you.")
            )}
         end
 
@@ -662,7 +662,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
          socket
          |> put_flash(
            :error,
-           Gettext.gettext(PhoenixKitWeb.Gettext, "You no longer have access to this dashboard.")
+           gettext("You no longer have access to this dashboard.")
          )
          |> push_navigate(to: Paths.index())}
       end
@@ -677,7 +677,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     if uuid == socket.assigns.dashboard.uuid do
       {:noreply,
        socket
-       |> put_flash(:info, Gettext.gettext(PhoenixKitWeb.Gettext, "This dashboard was deleted."))
+       |> put_flash(:info, gettext("This dashboard was deleted."))
        |> push_navigate(to: Paths.index())}
     else
       {:noreply, socket}
@@ -809,8 +809,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
   defp added(socket, {:error, :stale}), do: {:noreply, resync(socket)}
 
   defp added(socket, {:error, _}) do
-    {:noreply,
-     put_flash(socket, :error, Gettext.gettext(PhoenixKitWeb.Gettext, "Could not add widget."))}
+    {:noreply, put_flash(socket, :error, gettext("Could not add widget."))}
   end
 
   # A concurrent session wrote first (optimistic-lock miss): reload the current
@@ -820,7 +819,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
     case Dashboards.get(socket.assigns.dashboard.uuid) do
       nil ->
         socket
-        |> put_flash(:error, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard not found."))
+        |> put_flash(:error, gettext("Dashboard not found."))
         |> push_navigate(to: Paths.index())
 
       dashboard ->
@@ -829,10 +828,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
         |> ensure_active_layout()
         |> put_flash(
           :info,
-          Gettext.gettext(
-            PhoenixKitWeb.Gettext,
-            "Reloaded — this dashboard was just edited elsewhere."
-          )
+          gettext("Reloaded — this dashboard was just edited elsewhere.")
         )
     end
   end
@@ -916,7 +912,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           <.link
             navigate={Paths.edit(@dashboard.uuid)}
             class="btn btn-ghost btn-xs btn-square"
-            title={Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard settings")}
+            title={gettext("Dashboard settings")}
           >
             <.icon name="hero-pencil" class="w-3.5 h-3.5" />
           </.link>
@@ -932,7 +928,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
             }
             type="button"
             class="btn btn-ghost btn-sm btn-square"
-            title={Gettext.gettext(PhoenixKitWeb.Gettext, "Full screen")}
+            title={gettext("Full screen")}
           >
             <.icon name="hero-arrows-pointing-out" class="w-4 h-4" />
           </button>
@@ -945,7 +941,7 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
             class="btn btn-primary btn-sm"
           >
             <.icon name="hero-squares-plus" class="w-4 h-4" />
-            {Gettext.gettext(PhoenixKitWeb.Gettext, "Widgets")}
+            {gettext("Widgets")}
           </button>
         </div>
       </div>

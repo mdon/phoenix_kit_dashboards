@@ -33,7 +33,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
         {:noreply,
          socket
          |> assign(:dashboard, nil)
-         |> assign(:page_title, Gettext.gettext(PhoenixKitWeb.Gettext, "New dashboard"))}
+         |> assign(:page_title, gettext("New dashboard"))}
 
       :edit ->
         load_dashboard(socket, params["uuid"])
@@ -48,13 +48,13 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
        |> assign(:dashboard, dashboard)
        |> assign(
          :page_title,
-         Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard settings")
+         gettext("Dashboard settings")
        )}
     else
       _ ->
         {:noreply,
          socket
-         |> put_flash(:error, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard not found."))
+         |> put_flash(:error, gettext("Dashboard not found."))
          |> push_navigate(to: Paths.index())}
     end
   end
@@ -80,8 +80,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
 
     attrs =
       %{
-        title:
-          blank_to_default(title, Gettext.gettext(PhoenixKitWeb.Gettext, "Untitled Dashboard")),
+        title: blank_to_default(title, gettext("Untitled Dashboard")),
         config: %{"type" => type}
       }
       |> Map.merge(scope_attrs(params, socket))
@@ -95,7 +94,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
          put_flash(
            socket,
            :error,
-           Gettext.gettext(PhoenixKitWeb.Gettext, "Could not create dashboard.")
+           gettext("Could not create dashboard.")
          )}
     end
   end
@@ -103,8 +102,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
   defp update(socket, dashboard, title, params) do
     attrs =
       %{
-        title:
-          blank_to_default(title, Gettext.gettext(PhoenixKitWeb.Gettext, "Untitled Dashboard"))
+        title: blank_to_default(title, gettext("Untitled Dashboard"))
       }
       |> Map.merge(scope_attrs(params, socket))
 
@@ -116,7 +114,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
     if is_nil(fresh) or not manageable_by?(fresh, actor_uuid(socket)) do
       {:noreply,
        socket
-       |> put_flash(:error, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard not found."))
+       |> put_flash(:error, gettext("Dashboard not found."))
        |> push_navigate(to: Paths.index())}
     else
       do_update(socket, fresh, attrs)
@@ -128,7 +126,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
       {:ok, _dashboard} ->
         {:noreply,
          socket
-         |> put_flash(:info, Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard updated."))
+         |> put_flash(:info, gettext("Dashboard updated."))
          |> push_navigate(to: Paths.index())}
 
       {:error, :stale} ->
@@ -136,10 +134,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
          socket
          |> put_flash(
            :error,
-           Gettext.gettext(
-             PhoenixKitWeb.Gettext,
-             "This dashboard was just edited elsewhere — please try again."
-           )
+           gettext("This dashboard was just edited elsewhere — please try again.")
          )
          |> push_navigate(to: Paths.index())}
 
@@ -148,7 +143,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
          put_flash(
            socket,
            :error,
-           Gettext.gettext(PhoenixKitWeb.Gettext, "Could not update dashboard.")
+           gettext("Could not update dashboard.")
          )}
     end
   end
@@ -179,8 +174,8 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
 
   defp type_options do
     [
-      {Gettext.gettext(PhoenixKitWeb.Gettext, "Grid (responsive)"), "grid"},
-      {Gettext.gettext(PhoenixKitWeb.Gettext, "Pixel (free canvas)"), "pixel"}
+      {gettext("Grid (responsive)"), "grid"},
+      {gettext("Pixel (free canvas)"), "pixel"}
     ]
   end
 
@@ -194,8 +189,8 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
         </.link>
         <h1 class="text-2xl font-semibold">
           {if @dashboard,
-            do: Gettext.gettext(PhoenixKitWeb.Gettext, "Dashboard settings"),
-            else: Gettext.gettext(PhoenixKitWeb.Gettext, "New dashboard")}
+            do: gettext("Dashboard settings"),
+            else: gettext("New dashboard")}
         </h1>
       </div>
 
@@ -206,8 +201,8 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
               type="text"
               name="title"
               value={(@dashboard && @dashboard.title) || ""}
-              label={Gettext.gettext(PhoenixKitWeb.Gettext, "Title")}
-              placeholder={Gettext.gettext(PhoenixKitWeb.Gettext, "New dashboard title")}
+              label={gettext("Title")}
+              placeholder={gettext("New dashboard title")}
               autofocus
             />
 
@@ -215,7 +210,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
               <.select
                 :if={is_nil(@dashboard)}
                 name="type"
-                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Layout type")}
+                label={gettext("Layout type")}
                 value="grid"
                 options={type_options()}
               />
@@ -224,27 +219,27 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
               <.select
                 :if={@dashboard}
                 name="type_locked"
-                label={Gettext.gettext(PhoenixKitWeb.Gettext, "Layout type")}
+                label={gettext("Layout type")}
                 value={Dashboard.type(@dashboard)}
                 options={type_options()}
                 disabled
               />
               <p class="mt-1 text-xs text-base-content/50">
-                {Gettext.gettext(PhoenixKitWeb.Gettext, "Fixed once the dashboard is created.")}
+                {gettext("Fixed once the dashboard is created.")}
               </p>
             </div>
 
             <.select
               name="scope"
-              label={Gettext.gettext(PhoenixKitWeb.Gettext, "Visibility")}
+              label={gettext("Visibility")}
               value={(@dashboard && @dashboard.scope) || "personal"}
               options={
                 [
-                  {Gettext.gettext(PhoenixKitWeb.Gettext, "Personal"), "personal"},
-                  {Gettext.gettext(PhoenixKitWeb.Gettext, "Shared"), "system"}
+                  {gettext("Personal"), "personal"},
+                  {gettext("Shared"), "system"}
                 ] ++
                   if(role_scope_visible?(@dashboard),
-                    do: [{Gettext.gettext(PhoenixKitWeb.Gettext, "By role"), "role"}],
+                    do: [{gettext("By role"), "role"}],
                     else: []
                   )
               }
@@ -253,24 +248,24 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
             <.select
               :if={role_scope_visible?(@dashboard)}
               name="role_uuid"
-              label={Gettext.gettext(PhoenixKitWeb.Gettext, "Role")}
+              label={gettext("Role")}
               value={@dashboard && @dashboard.role_uuid}
               options={Enum.map(@roles, &{&1.name, &1.uuid})}
             />
 
             <div class="flex justify-end gap-2 pt-2">
               <.link navigate={Paths.index()} class="btn btn-ghost">
-                {Gettext.gettext(PhoenixKitWeb.Gettext, "Cancel")}
+                {gettext("Cancel")}
               </.link>
               <button
                 type="submit"
-                phx-disable-with={Gettext.gettext(PhoenixKitWeb.Gettext, "Saving…")}
+                phx-disable-with={gettext("Saving…")}
                 class="btn btn-primary"
               >
                 <.icon :if={is_nil(@dashboard)} name="hero-plus" class="w-4 h-4" />
                 {if @dashboard,
-                  do: Gettext.gettext(PhoenixKitWeb.Gettext, "Save"),
-                  else: Gettext.gettext(PhoenixKitWeb.Gettext, "Create")}
+                  do: gettext("Save"),
+                  else: gettext("Create")}
               </button>
             </div>
           </form>

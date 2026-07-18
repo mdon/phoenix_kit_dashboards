@@ -6,6 +6,8 @@ defmodule PhoenixKitDashboards.Web.Helpers do
   context mutations that accept a trailing `opts \\ []` (for activity logging).
   """
 
+  use Gettext, backend: PhoenixKitWeb.Gettext
+
   alias PhoenixKit.Users.Roles
   alias PhoenixKitDashboards.Dashboards
 
@@ -18,14 +20,16 @@ defmodule PhoenixKitDashboards.Web.Helpers do
   def translate_catalog(nil), do: nil
 
   def translate_catalog(string) when is_binary(string) do
+    # Runtime translation of a dynamic value — the `gettext/1` macro needs a
+    # literal, so this stays the explicit runtime-function form.
     Gettext.gettext(PhoenixKitWeb.Gettext, string)
   end
 
   @doc "Translated label for a dashboard scope enum value."
   @spec scope_label(String.t()) :: String.t()
-  def scope_label("personal"), do: Gettext.gettext(PhoenixKitWeb.Gettext, "personal")
-  def scope_label("system"), do: Gettext.gettext(PhoenixKitWeb.Gettext, "shared")
-  def scope_label("role"), do: Gettext.gettext(PhoenixKitWeb.Gettext, "role")
+  def scope_label("personal"), do: gettext("personal")
+  def scope_label("system"), do: gettext("shared")
+  def scope_label("role"), do: gettext("role")
   def scope_label(other), do: other
 
   @doc "The current user's uuid from socket assigns, or `nil`."
