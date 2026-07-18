@@ -484,8 +484,8 @@ defmodule PhoenixKitDashboards.Dashboards do
   defp place_at_cell(dashboard, item, instance_id, layout_id, x, y) do
     cols = grid_cols(dashboard, layout_id)
     placement = Layout.placement(item, layout_id)
-    w = min(placement["w"], cols)
-    h = placement["h"]
+    w = min(max(int(placement["w"], 1), 1), cols)
+    h = max(int(placement["h"], 1), 1)
     x = clamp(x, 0, max(cols - w, 0))
     y = clamp(y, 0, max(grid_rows(dashboard, layout_id) - h, 0))
 
@@ -555,7 +555,8 @@ defmodule PhoenixKitDashboards.Dashboards do
 
     case {placement["x"], placement["y"]} do
       {x, y} when is_integer(x) and is_integer(y) ->
-        {w2, h2} = Grid.fit_size(x, y, w, h, placement["h"], others, {cols, rows}, bounds)
+        orig_h = max(int(placement["h"], 1), 1)
+        {w2, h2} = Grid.fit_size(x, y, w, h, orig_h, others, {cols, rows}, bounds)
 
         # fit_size floors at the view's min — when even that floor doesn't fit
         # (a raised per-view minimum in a tight corner), keep the current size
@@ -1164,11 +1165,13 @@ defmodule PhoenixKitDashboards.Dashboards do
   defp grow_on_layout(dashboard, item, layout_id, min, layout) do
     cols = grid_cols(dashboard, layout_id)
     p = Layout.placement(item, layout_id)
-    w = max(p["w"], min(min.w, cols))
-    h = max(p["h"], min.h)
+    orig_w = max(int(p["w"], 1), 1)
+    orig_h = max(int(p["h"], 1), 1)
+    w = max(orig_w, min(min.w, cols))
+    h = max(orig_h, min.h)
 
     cond do
-      w == p["w"] and h == p["h"] ->
+      w == orig_w and h == orig_h ->
         item
 
       is_integer(p["x"]) and is_integer(p["y"]) ->

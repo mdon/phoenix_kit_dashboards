@@ -7,8 +7,9 @@ defmodule PhoenixKitDashboards.Web.BuilderComponents do
   resolves `<.grid>` / `<.catalog_drawer>` / `<.settings_modal>` here.
 
   No behavior change: the moved helpers call `Lattice.to_int/2` / `Lattice.clamp/3`
-  directly (BuilderLive keeps its own thin `to_int`/`clamp` wrappers for its
-  event handlers, avoiding a mutual import).
+  directly (BuilderLive keeps its own `to_i/1`, an unrelated event-param
+  rounder for live drag/resize payloads — not a `Lattice` wrapper — avoiding a
+  mutual import).
   """
   use PhoenixKitWeb, :html
 

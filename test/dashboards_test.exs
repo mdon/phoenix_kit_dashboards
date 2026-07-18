@@ -454,6 +454,24 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert %{"w" => 12, "h" => 8} = Dashboards.resolve_placement(grown, clock, "l1")
     end
 
+    test "view-switch growth coerces a legacy string w instead of raising", %{
+      dashboard: dashboard
+    } do
+      {:ok, d} = Dashboards.add_widget(dashboard, "core.clock")
+      clock = List.last(d.layout)["id"]
+      {:ok, d} = Dashboards.place_widget_grid(d, clock, "l1", 0, 0)
+
+      # A legacy/tampered row stores "w" as a string with a valid integer
+      # "h" — grow_on_layout must coerce "w" before the `p["x"] + w` bound
+      # check, not raise ArithmeticError.
+      item = Enum.find(d.layout, &(&1["id"] == clock))
+      tampered = Layout.put_placement(item, "l1", %{"w" => "12"})
+      d = %{d | layout: [tampered]}
+
+      assert {:ok, grown} = Dashboards.configure_widget(d, clock, %{view: "analog"})
+      assert %{"w" => 12, "h" => 8} = Dashboards.resolve_placement(grown, clock, "l1")
+    end
+
     test "view-switch growth is skipped where a neighbour blocks it", %{dashboard: dashboard} do
       # The setup note sits at (0,0) 16x8; park the clock beside it on row 0.
       {:ok, d} = Dashboards.add_widget(dashboard, "core.clock")
@@ -525,6 +543,20 @@ defmodule PhoenixKitDashboards.DashboardsTest do
       assert {:error, :occupied} = Dashboards.place_widget_grid(d, id, "l1", 16, 0)
       # The clear spot right below works.
       assert {:ok, _} = Dashboards.place_widget_grid(d, id, "l1", 16, 8)
+    end
+
+    test "coerces a legacy string span instead of raising", %{dashboard: d, id: id} do
+      # A pre-Lattice.to_int JSONB row (or a tampered one) stores "w"/"h" as
+      # strings — place_at_cell must coerce them like every other geometry
+      # call site, not raise ArithmeticError on the row-bound arithmetic.
+      [item] = d.layout
+      tampered = Layout.put_placement(item, "l1", %{"x" => 0, "y" => 0, "w" => "8", "h" => "4"})
+      d = %{d | layout: [tampered]}
+
+      assert {:ok, placed} = Dashboards.place_widget_grid(d, id, "l1", 10, 6)
+
+      assert %{"x" => 10, "y" => 6, "w" => 8, "h" => 4} =
+               Layout.placement(hd(placed.layout), "l1")
     end
 
     test "add_widget_at drops a catalog widget at the given cell",

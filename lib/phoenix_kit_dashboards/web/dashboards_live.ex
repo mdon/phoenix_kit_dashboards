@@ -161,12 +161,7 @@ defmodule PhoenixKitDashboards.Web.DashboardsLive do
               <span>{type_label(dashboard)}</span>
               <span aria-hidden="true">·</span>
               <span>
-                {Gettext.ngettext(
-                  PhoenixKitWeb.Gettext,
-                  "%{count} widget",
-                  "%{count} widgets",
-                  length(dashboard.layout)
-                )}
+                {ngettext("%{count} widget", "%{count} widgets", length(dashboard.layout))}
               </span>
             </p>
             <%!-- Primary action stays a visible button; secondary actions live
