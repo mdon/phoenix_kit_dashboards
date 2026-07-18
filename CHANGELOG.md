@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-07-18
+
+### Changed
+
+- Resolved the 15-finding 2026-07-16 code review: touch drag-out pointer-capture
+  loss, pixel-canvas resize rubber-band, mixed-type numeric coercion in grid
+  math, clock-widget size docs, dead/unwired API removal, permission-check
+  consolidation onto `Web.Helpers.viewable_by?`/`manageable_by?`, registry cache
+  invalidation on enable, context↔LiveView geometry duplication collapsed into
+  `Lattice`/`Sizing`/`Grid`.
+- `builder_live.ex` (2028→991 lines): presentational layer extracted to the new
+  `Web.BuilderComponents`.
+- `dashboards.ex` (1503→1459 lines): pure helpers extracted to `Layouts`; the
+  packer consolidated onto `Grid.slot/5` + `Grid.pack/4`, with `Grid.compact/3`
+  kept as a distinct size-preserving reflow (a multi-AI re-review caught and
+  fixed a regression where the two briefly shared code and `compact` started
+  silently rewriting a caller's stored `h`).
+- `bp`/"tier" vocabulary renamed to `layout_id`/"layout" throughout (the JSONB
+  storage key stays `"bp"` for back-compat).
+- JS collision math (`rectsOverlap`/`fitSpan`) deduped, pinned against
+  `Grid.fit_size/8` via a Node test harness.
+- Converted ~109 call sites from `Gettext.gettext(PhoenixKitWeb.Gettext, "...")`
+  to the `gettext/1` macro idiom (compile-time extraction); pure syntax change,
+  identical msgids.
+
+### Fixed
+
+- `Dashboards.place_at_cell/5` (a grid drag-to-cell drop) crashed with
+  `ArithmeticError` on a widget instance carrying a legacy/tampered string
+  span (`"h" => "4"`) — `Layout.placement/2`'s `"w"`/`"h"` were used in
+  arithmetic without the `Lattice.to_int/2` coercion every other geometry call
+  site applies.
+- `Dashboards.grow_on_layout/5` (a widget view switch that raises the view's
+  minimum size) had the same gap and could likewise crash with
+  `ArithmeticError` on a legacy string `"w"`.
+- `Dashboards.resize_instance/7` passed an uncoerced `"h"` into
+  `Grid.fit_size/8`, silently discarding a legacy/tampered stored height
+  instead of using it.
+- A widget-count caption in `DashboardsLive` used the runtime
+  `Gettext.ngettext/4` form, left over from the gettext idiom conversion above
+  — invisible to `mix gettext.extract`, so it could never gain a translation.
+  Converted to the `ngettext/3` macro.
+
 ## [0.2.0] - 2026-07-16
 
 ### Added
