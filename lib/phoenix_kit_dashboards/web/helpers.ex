@@ -41,37 +41,25 @@ defmodule PhoenixKitDashboards.Web.Helpers do
   def scope_label("role"), do: gettext("role")
   def scope_label(other), do: other
 
-  @doc "The current user's uuid from socket assigns, or `nil`."
+  @doc "The current user's uuid, or `nil` — see `PhoenixKitWeb.Actor.uuid/1`."
   @spec actor_uuid(Phoenix.LiveView.Socket.t()) :: String.t() | nil
-  def actor_uuid(socket) do
-    case socket.assigns[:phoenix_kit_current_user] do
-      %{uuid: uuid} -> uuid
-      _ -> nil
-    end
-  end
+  defdelegate actor_uuid(socket), to: PhoenixKitWeb.Actor, as: :uuid
 
   @doc """
   The current user's uuid from a bare SCOPE, for render-side callers that have
   no socket (the slot chrome decides whether to show "Edit layout" from the
   scope it was handed).
   """
-  @spec scope_actor_uuid(map() | nil) :: String.t() | nil
-  def scope_actor_uuid(%{user: %{uuid: uuid}}) when is_binary(uuid), do: uuid
-  def scope_actor_uuid(_scope), do: nil
+  @spec scope_actor_uuid(PhoenixKit.Users.Auth.Scope.t() | nil) :: String.t() | nil
+  defdelegate scope_actor_uuid(scope), to: PhoenixKitWeb.Actor, as: :uuid
 
   @doc """
-  Keyword opts threading the acting user's uuid into context mutations.
-
-  Returns `[actor_uuid: uuid]`, or `[]` when there is no current user (so the
-  context call is unaffected).
+  Keyword opts threading the acting user's uuid into context mutations:
+  `[actor_uuid: uuid]`, or `[]` when there is no current user (so the context
+  call is unaffected) — see `PhoenixKitWeb.Actor.opts/1`.
   """
   @spec actor_opts(Phoenix.LiveView.Socket.t()) :: keyword()
-  def actor_opts(socket) do
-    case actor_uuid(socket) do
-      nil -> []
-      uuid -> [actor_uuid: uuid]
-    end
-  end
+  defdelegate actor_opts(socket), to: PhoenixKitWeb.Actor, as: :opts
 
   @doc """
   The current user's role uuids, mapped from the scope's cached role names — used
