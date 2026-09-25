@@ -91,7 +91,12 @@ defmodule PhoenixKitDashboards.MixProject do
       # `write/3` rescues into a generic message — so on an older 2.x every
       # place/unplace/reprioritise would fail SILENTLY and the admin would
       # only ever see "That didn't work. Try again."
-      pk_dep(:phoenix_kit, "~> 2.15"),
+      # 2.38.0 is the floor now: the actor and the activity log come from
+      # `PhoenixKitWeb.Actor` and `PhoenixKit.Activity.log/3`, first shipped
+      # there and no longer feature-detected, so a lower core fails to compile.
+      # Patch-precise floor in the compound form, so the ceiling stays open
+      # through every later 2.x minor (see test/core_pin_conformance_test.exs).
+      pk_dep(:phoenix_kit, ">= 2.38.0 and < 3.0.0"),
 
       # Per-module i18n — own Gettext backend for the sidebar tab labels and
       # this module's own UI strings (see `PhoenixKitDashboards.Gettext`).

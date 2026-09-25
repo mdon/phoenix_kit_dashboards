@@ -11,7 +11,7 @@ provider returns from `phoenix_kit_widgets/0`; a dashboard is a user-owned 2D
 canvas of placed widget *instances*, persisted as a JSONB `layout` list, scoped
 personal / system / role.
 
-- **Depends on:** `phoenix_kit` `~> 2.0` (Hex). No sibling `phoenix_kit_*` deps —
+- **Depends on:** `phoenix_kit` `>= 2.38.0 and < 3.0.0` (Hex). No sibling `phoenix_kit_*` deps —
   the widget contract is duck-typed, so a provider is never a dependency.
 - **Consumed by:** nothing. The dependency arrow points one way (a provider
   exposes `phoenix_kit_widgets/0`; this module discovers it at runtime).
