@@ -123,7 +123,11 @@ defmodule PhoenixKitDashboards.Web.BuilderLive do
           {:noreply,
            socket
            |> assign(:dashboard, dashboard)
+           # Trail: Admin Panel / Dashboards / <dashboard>.
            |> assign(:page_title, dashboard.title)
+           |> assign(:page_section, gettext("Dashboards"))
+           |> assign(:page_section_path, Paths.index())
+           |> assign(:page_crumbs, [])
            |> assign_places()
            |> resolve_active_layout(params["layout"])
            |> maybe_schedule_refresh()}
