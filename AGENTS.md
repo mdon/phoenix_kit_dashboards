@@ -11,7 +11,7 @@ provider returns from `phoenix_kit_widgets/0`; a dashboard is a user-owned 2D
 canvas of placed widget *instances*, persisted as a JSONB `layout` list, scoped
 personal / system / role.
 
-- **Depends on:** `phoenix_kit` `~> 2.0` (Hex). No sibling `phoenix_kit_*` deps —
+- **Depends on:** `phoenix_kit` `>= 2.38.0 and < 3.0.0` (Hex). No sibling `phoenix_kit_*` deps —
   the widget contract is duck-typed, so a provider is never a dependency.
 - **Consumed by:** nothing. The dependency arrow points one way (a provider
   exposes `phoenix_kit_widgets/0`; this module discovers it at runtime).
@@ -149,9 +149,9 @@ Repo-local aliases:
   `Registry.refresh/0` so a provider enabled alongside this module is picked up
   without a BEAM restart.
 - **Activity logging:** every mutating context function takes `opts \\ []` and
-  logs through `PhoenixKit.Activity.log/1`, guarded with `Code.ensure_loaded?/1`
-  and rescued so a logging failure never crashes the mutation. LiveViews thread
-  the actor with `Web.Helpers.actor_opts/1`. `save_layout/2` is the drag/resize
+  logs through core's `PhoenixKit.Activity.log/3`, which never raises, so a
+  logging failure never crashes the mutation. LiveViews thread the actor with
+  `Web.Helpers.actor_opts/1` (core's `PhoenixKitWeb.Actor`). `save_layout/2` is the drag/resize
   hot path and is deliberately **not** logged.
 - **Dashboard type is fixed at creation** — `config["type"]` is `"grid"` or
   `"pixel"` and there is no runtime toggle (legacy `config["mode"]` `"free"`

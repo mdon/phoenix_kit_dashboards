@@ -26,7 +26,14 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, :roles, list_roles())}
+    # Trail: Admin Panel / Dashboards / New dashboard, or
+    # / Dashboards / <dashboard> / Edit; title and crumbs land in handle_params.
+    {:ok,
+     socket
+     |> assign(:roles, list_roles())
+     |> assign(:page_section, gettext("Dashboards"))
+     |> assign(:page_section_path, Paths.index())
+     |> assign(:page_crumbs, [])}
   end
 
   @impl true
@@ -37,6 +44,7 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
          socket
          |> assign(:dashboard, nil)
          |> assign(:placed_in, [])
+         |> assign(:page_crumbs, [])
          |> assign(:page_title, gettext("New dashboard"))}
 
       :edit ->
@@ -51,10 +59,8 @@ defmodule PhoenixKitDashboards.Web.DashboardFormLive do
        socket
        |> assign(:dashboard, dashboard)
        |> assign(:placed_in, placed_in(dashboard))
-       |> assign(
-         :page_title,
-         gettext("Dashboard settings")
-       )}
+       |> assign(:page_crumbs, [%{label: dashboard.title, path: Paths.builder(dashboard.uuid)}])
+       |> assign(:page_title, gettext("Edit"))}
     else
       _ ->
         {:noreply,

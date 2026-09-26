@@ -27,6 +27,7 @@ defmodule PhoenixKitDashboards.Web.SlotLive do
 
   alias PhoenixKitDashboards.Dashboards
   alias PhoenixKitDashboards.Layouts
+  alias PhoenixKitDashboards.Paths
   alias PhoenixKitDashboards.Placements
   alias PhoenixKitDashboards.Refresh
   alias PhoenixKitDashboards.Schemas.Dashboard
@@ -38,7 +39,17 @@ defmodule PhoenixKitDashboards.Web.SlotLive do
   def mount(_params, _session, socket) do
     if connected?(socket), do: Placements.subscribe()
 
-    {:ok, assign(socket, id_prefix: "pk-slot-", context: %{}, active_index: 0)}
+    # Trail: Admin Panel / Dashboards / Places / <slot>; the title lands in
+    # load_slot/1 once the slot is known.
+    {:ok,
+     assign(socket,
+       id_prefix: "pk-slot-",
+       context: %{},
+       active_index: 0,
+       page_section: gettext("Dashboards"),
+       page_section_path: Paths.index(),
+       page_crumbs: [%{label: gettext("Places"), path: Paths.places()}]
+     )}
   end
 
   # Which slot this page is. The tab's `metadata` carries the key when core

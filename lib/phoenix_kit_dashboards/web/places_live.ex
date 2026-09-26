@@ -46,8 +46,12 @@ defmodule PhoenixKitDashboards.Web.PlacesLive do
 
     {:ok,
      socket
+     # Trail: Admin Panel / Dashboards / Places.
      |> assign(
        page_title: gettext("Places"),
+       page_section: gettext("Dashboards"),
+       page_section_path: Paths.index(),
+       page_crumbs: [],
        open_slot: nil,
        form_audience: "everyone",
        error: nil

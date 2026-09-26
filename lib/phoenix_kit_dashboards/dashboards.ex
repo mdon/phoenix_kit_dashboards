@@ -10,8 +10,6 @@ defmodule PhoenixKitDashboards.Dashboards do
 
   import Ecto.Query
 
-  require Logger
-
   alias PhoenixKit.PubSubHelper
   alias PhoenixKit.RepoHelper
   alias PhoenixKitDashboards.Binds
@@ -1486,38 +1484,25 @@ defmodule PhoenixKitDashboards.Dashboards do
   defp int(v, default), do: Lattice.to_int(v, default)
 
   # Log a business-level activity on the {:ok, dashboard} branch only, passing
-  # through the original result. Guarded + rescued so a logging failure never
-  # crashes the mutation (workspace convention). save_layout/2 stays unlogged —
-  # it is the drag/resize hot path.
+  # through the original result. Core's log never raises, so a logging failure
+  # never crashes the mutation. save_layout/2 stays unlogged — it is the
+  # drag/resize hot path.
   defp log_on_ok(result, action, opts, extra_metadata \\ %{})
 
   defp log_on_ok({:ok, %Dashboard{} = dashboard} = result, action, opts, extra_metadata) do
-    if Code.ensure_loaded?(PhoenixKit.Activity) do
-      metadata =
-        %{"title" => dashboard.title, "scope" => dashboard.scope}
-        |> Map.merge(extra_metadata)
-        |> Map.merge(Keyword.get(opts, :log_extra, %{}))
+    metadata =
+      %{"title" => dashboard.title, "scope" => dashboard.scope}
+      |> Map.merge(extra_metadata)
+      |> Map.merge(Keyword.get(opts, :log_extra, %{}))
 
-      PhoenixKit.Activity.log(%{
-        action: action,
-        module: "dashboards",
-        mode: "manual",
-        actor_uuid: Keyword.get(opts, :actor_uuid),
-        resource_type: "dashboard",
-        resource_uuid: dashboard.uuid,
-        metadata: metadata
-      })
-    end
+    PhoenixKit.Activity.log("dashboards", action,
+      actor_uuid: Keyword.get(opts, :actor_uuid),
+      resource_type: "dashboard",
+      resource_uuid: dashboard.uuid,
+      metadata: metadata
+    )
 
     result
-  rescue
-    e ->
-      Logger.warning("[Dashboards] Activity logging error: #{Exception.message(e)}")
-      result
-  catch
-    :exit, reason ->
-      Logger.warning("[Dashboards] Activity logging exit: #{inspect(reason)}")
-      result
   end
 
   defp log_on_ok(result, _action, _opts, _extra_metadata), do: result

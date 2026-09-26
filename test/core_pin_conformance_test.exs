@@ -27,17 +27,24 @@ defmodule PhoenixKitDashboards.CorePinConformanceTest do
 
   ## Raising the floor again
 
-  Whenever this module starts calling a core function newer than 2.15.0, move
+  Whenever this module starts calling a core function newer than 2.38.0, move
   BOTH the `mix.exs` requirement and `@floor` here, and add the version below
   it to `@must_reject`. A floor that lags the API is invisible to every other
   gate in the repo, because the suite runs against local core.
+
+  The floor is `>= 2.38.0 and < 3.0.0` now: the actor and the activity log
+  come from `PhoenixKitWeb.Actor` and `Activity.log/3`, first shipped in core
+  2.38.0 and no longer feature-detected — an older core does not compile the
+  package. Any earlier floor's reasons above still hold below it. Keep the
+  compound form: patch-precise at the bottom, open through every later 2.x
+  minor at the top.
   """
 
-  @floor "2.15.0"
-  @must_admit ["2.15.0", "2.15.4", "2.16.0", "2.22.16", "2.99.0"]
-  @must_reject ["1.7.189", "1.7.236", "1.9.4", "2.0.0", "2.14.9", "3.0.0"]
+  @floor "2.38.0"
+  @must_admit ["2.38.0", "2.38.1", "2.39.0", "2.99.4"]
+  @must_reject ["1.7.236", "2.0.0", "2.15.0", "2.15.4", "2.16.0", "2.22.16", "2.37.5", "3.0.0"]
 
-  test "the :phoenix_kit requirement admits every core 2.x and nothing else" do
+  test "the :phoenix_kit requirement admits every core >= 2.38.0 minor and nothing else" do
     requirement = core_requirement()
 
     assert match?({:ok, _parsed}, Version.parse_requirement(requirement)),
@@ -48,7 +55,7 @@ defmodule PhoenixKitDashboards.CorePinConformanceTest do
              "`:phoenix_kit` requirement #{inspect(requirement)} rejects core #{version}. " <>
                "A pin that excludes a core minor at or above the floor breaks " <>
                "`mix deps.get` for every host running this module alongside that " <>
-               "core. Keep it the two-segment `~> #{@floor}`."
+               "core. Keep the floor patch-precise and the ceiling open (`>= 2.38.0 and < 3.0.0`)."
     end
 
     for version <- @must_reject do
@@ -64,7 +71,7 @@ defmodule PhoenixKitDashboards.CorePinConformanceTest do
     assert Version.match?(@floor, requirement),
            "the requirement must admit the floor #{@floor} itself"
 
-    refute Version.match?("2.14.9", requirement),
+    refute Version.match?("2.37.5", requirement),
            "core 2.14.9 lacks `Settings.update_setting_with_module/4`, which " <>
              "`Placements.write/3` calls — every placement write would fail silently"
   end
